@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from aegiswifi.api.v1.auth import require_current_user
-from aegiswifi.core.exceptions import AegisError, EntityNotFoundError
+from aegiswifi.core.exceptions import AegisError, NotFound
 from aegiswifi.database.engine import get_db
 from aegiswifi.database.models import User, UserRole
 from aegiswifi.users import service
@@ -54,7 +54,7 @@ def get_user(
     try:
         user = service.get_user_by_id(db, user_id)
         return UserRead.model_validate(user)
-    except EntityNotFoundError as exc:
+    except NotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
@@ -68,7 +68,7 @@ def update_user(
     try:
         user = service.update_user(db, user_id, payload)
         return UserRead.model_validate(user)
-    except EntityNotFoundError as exc:
+    except NotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except AegisError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

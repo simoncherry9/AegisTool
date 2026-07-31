@@ -6,7 +6,14 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN="${PYTHON:-python3}"
+
+# Seleccionar binario de Python (preferir python3.13 si existe)
+if command -v python3.13 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.13"
+else
+  PYTHON_BIN="${PYTHON:-python3}"
+fi
+
 VENV_DIR="${VENV:-$REPO/.venv}"
 BUILD_MODE="${1:-dev}"  # dev | --build
 
@@ -24,8 +31,15 @@ if [[ "${1:-}" == "--stop" ]]; then
   exit 0
 fi
 
+# ─── 0. Copiar config.example.yaml → config.yaml ─────────────────────────────
+if [[ ! -f "$REPO/config.yaml" && -f "$REPO/config.example.yaml" ]]; then
+  log "copiando config.example.yaml → config.yaml…"
+  cp "$REPO/config.example.yaml" "$REPO/config.yaml"
+  ok "config.yaml preparado"
+fi
+
 # ─── 1. Requisitos ───────────────────────────────────────────────────────────
-log "comprobando dependencias del sistema…"
+log "comprobando dependencias del sistema con $PYTHON_BIN…"
 require_cmd "$PYTHON_BIN"
 require_cmd git
 require_cmd npm
@@ -42,12 +56,12 @@ if [[ -f /etc/os-release ]] && grep -qi 'kali' /etc/os-release; then
     sudo apt-get update -qq && sudo apt-get install -y -qq "${missing[@]}"
   fi
 else
-  warn "no se detectó Kali Linux — las herramientas Wi-Fi pueden no funcionar"
+  warn "no se detectó Kali Linux — las herramientas Wi-Fi pueden requerir paquetes adicionales"
 fi
 
 # ─── 2. Virtualenv ───────────────────────────────────────────────────────────
 if [[ ! -d "$VENV_DIR" ]]; then
-  log "creando virtualenv en $VENV_DIR…"
+  log "creando entorno virtual en $VENV_DIR ($PYTHON_BIN)…"
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
@@ -58,13 +72,14 @@ ALEMBIC_VENV="$VENV_DIR/bin/alembic"
 log "actualizando pip…"
 "$PIP_VENV" install --upgrade pip --quiet
 
-log "instalando backend (editable)…"
-"$PIP_VENV" install -e "$REPO" --quiet
+log "instalando backend en modo editable con dependencias dev (pip install -e '.[dev]')..."
+(cd "$REPO" && "$PIP_VENV" install -e ".[dev]" --quiet)
+ok "backend instalado"
 
 # ─── 3. .env con Fernet key autogenerada ─────────────────────────────────────
 ENV_FILE="$REPO/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
-  log "generando .env con clave Fernet…"
+  log "generando .env con clave de cifrado Fernet…"
   FERNET_KEY=$("$PY_VENV" -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
   cat > "$ENV_FILE" <<ENVEOF
 # AegisWiFi — generado automáticamente por install.sh
@@ -95,46 +110,49 @@ fi
 log "creando directorios de datos…"
 mkdir -p "$REPO/data/evidence" "$REPO/data/job_logs" "$REPO/data/hashes"
 
-# ─── 5. Frontend ─────────────────────────────────────────────────────────────
-log "instalando dependencias del frontend…"
-(cd "$REPO/frontend" && npm install --silent)
-
-if [[ "${1:-}" == "--build" ]]; then
-  log "compilando frontend (producción)…"
-  (cd "$REPO/frontend" && npm run build)
-  ok "frontend compilado en frontend/dist/"
+# ─── 5. Migraciones (alembic upgrade head / make migrate) ────────────────────
+log "aplicando migraciones de base de datos (make migrate)…"
+if (cd "$REPO" && "$PY_VENV" -m alembic -c backend/alembic.ini upgrade head); then
+  ok "migraciones aplicadas (esquema SQLite actualizado)"
 else
-  log "frontend listo para dev-server (npm run dev)"
+  err "fallaron las migraciones de Alembic"
+  exit 1
 fi
 
-# ─── 6. Migraciones ──────────────────────────────────────────────────────────
-log "aplicando migraciones de base de datos…"
-if (cd "$REPO" && "$ALEMBIC_VENV" -c "$REPO/backend/alembic.ini" upgrade head); then
-  ok "migraciones aplicadas"
-else
-  warn "alembic falló — ejecuta: source .venv/bin/activate && alembic -c backend/alembic.ini upgrade head"
-fi
-
-# ─── 7. Diagnóstico ──────────────────────────────────────────────────────────
-log "verificando instalación…"
-"$PY_VENV" -c "import aegiswifi; print('  aegiswifi', aegiswifi.__version__)" 2>/dev/null \
-  && ok "backend importable" \
+# ─── 6. Diagnóstico de CLI y módulo ──────────────────────────────────────────
+log "verificando instalación de aegiswifi…"
+"$PY_VENV" -c "import aegiswifi; print('  aegiswifi versión:', aegiswifi.__version__)" 2>/dev/null \
+  && ok "backend importable correctamente" \
   || err "no se pudo importar aegiswifi"
 
 if "$VENV_DIR/bin/aegiswifi" --help >/dev/null 2>&1; then
-  ok "CLI lista: aegiswifi --help"
+  ok "CLI lista (aegiswifi --help)"
 fi
 
-ok "instalación completada"
+# ─── 7. Frontend ─────────────────────────────────────────────────────────────
+log "instalando dependencias del frontend (cd frontend && npm install)…"
+(cd "$REPO/frontend" && npm install --silent)
+ok "dependencias del frontend instaladas"
+
+if [[ "${BUILD_MODE}" == "--build" ]]; then
+  log "compilando frontend para producción…"
+  (cd "$REPO/frontend" && npm run build)
+  ok "frontend compilado en frontend/dist/"
+else
+  log "frontend preparado para dev-server (npm run dev)"
+fi
+
+ok "instalación y configuración completadas"
 
 # ─── 8. Arrancar servicios ───────────────────────────────────────────────────
-log "iniciando servicios…"
+log "iniciando servicios de AegisWiFi…"
 
 # Detener instancias previas si las hubiera
 pkill -f "uvicorn aegiswifi.main:app" 2>/dev/null || true
+pkill -f "vite" 2>/dev/null || true
 
-# Backend (uvicorn)
-log "  → backend  en  http://127.0.0.1:8001"
+# Backend (uvicorn / aegiswifi serve)
+log "  → Levantando API Backend en http://127.0.0.1:8001"
 "$VENV_DIR/bin/uvicorn" aegiswifi.main:app \
   --host 127.0.0.1 --port 8001 \
   --reload \
@@ -142,35 +160,36 @@ log "  → backend  en  http://127.0.0.1:8001"
 BACKEND_PID=$!
 
 # Frontend (vite dev server)
-log "  → frontend en http://127.0.0.1:5173"
+log "  → Levantando Frontend Web en http://127.0.0.1:5173"
 (cd "$REPO/frontend" && npm run dev) > "$REPO/data/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 
-# Pequeña pausa para que arranquen
+# Pausa para inicio
 sleep 3
 
-# Verificar que levantaron
+# Verificar estado de los procesos
 if kill -0 "$BACKEND_PID" 2>/dev/null; then
-  ok "backend corriendo (PID $BACKEND_PID)"
+  ok "Backend API corriendo (PID $BACKEND_PID)"
 else
-  err "backend no arrancó — revisa data/backend.log"
+  err "Backend API no pudo arrancar — revisa data/backend.log"
 fi
 
 if kill -0 "$FRONTEND_PID" 2>/dev/null; then
-  ok "frontend corriendo (PID $FRONTEND_PID)"
+  ok "Frontend Web corriendo (PID $FRONTEND_PID)"
 else
-  warn "frontend no arrancó — revisa data/frontend.log"
+  warn "Frontend no pudo arrancar — revisa data/frontend.log"
 fi
 
 echo ""
 echo "  ┌────────────────────────────────────────────────────────┐"
-echo "  │  AegisWiFi está corriendo                              │"
+echo "  │  AegisWiFi está corriendo exitosamente                 │"
 echo "  │                                                        │"
-echo "  │  Frontend :  http://127.0.0.1:5173                     │"
-echo "  │  Backend  :  http://127.0.0.1:8001                     │"
-echo "  │  API docs :  http://127.0.0.1:8001/docs                │"
+echo "  │  Frontend Web :  http://127.0.0.1:5173                 │"
+echo "  │  Backend API  :  http://127.0.0.1:8001                 │"
+echo "  │  Documentación:  http://127.0.0.1:8001/docs            │"
+echo "  │  Usuario Admin:  admin / admin123                      │"
 echo "  │                                                        │"
-echo "  │  Para detener:  ./install.sh --stop                    │"
+echo "  │  Para detener:   ./install.sh --stop                   │"
 echo "  │  Para reiniciar: ./install.sh                          │"
 echo "  └────────────────────────────────────────────────────────┘"
 echo ""

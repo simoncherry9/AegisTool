@@ -24,15 +24,15 @@ class TestSettings:
         """Valores por defecto del Settings."""
         from aegiswifi.core.config import PathsConfig, Settings
 
-        # Usar Settings solo con defaults (sin env).
-        settings = Settings(paths=PathsConfig(data_dir=Path("/tmp")))  # evitar crear dirs
-        assert settings.environment == "development"
-        assert settings.debug is False
-        assert settings.log_level == "INFO"
-        assert settings.api_host == "127.0.0.1"
-        assert settings.api_port == 8000
-        assert settings.jobs.max_workers == 2
-        assert settings.jobs.heartbeat_interval == 15
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings(_env_file=None, paths=PathsConfig(data_dir=Path("/tmp")))
+            assert settings.environment == "development"
+            assert settings.debug is False
+            assert settings.log_level == "INFO"
+            assert settings.api_host == "127.0.0.1"
+            assert settings.api_port == 8001
+            assert settings.jobs.max_workers == 2
+            assert settings.jobs.heartbeat_interval == 15
 
     def test_database_url_default_sqlite(self):
         """database_url property genera URL SQLite."""

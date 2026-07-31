@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from aegiswifi.core.exceptions import AegisError, EntityNotFoundError
+from aegiswifi.core.exceptions import AegisError, NotFound
 from aegiswifi.core.security import hash_password, verify_password
 from aegiswifi.database.models import User, UserRole
 from aegiswifi.users.schemas import UserCreate, UserUpdate
@@ -32,7 +32,7 @@ def list_users(db: Session) -> list[User]:
 def get_user_by_id(db: Session, user_id: int) -> User:
     user = db.get(User, user_id)
     if not user:
-        raise EntityNotFoundError(f"Usuario {user_id} no encontrado")
+        raise NotFound(f"Usuario {user_id} no encontrado")
     return user
 
 

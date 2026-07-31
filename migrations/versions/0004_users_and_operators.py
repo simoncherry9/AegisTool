@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0004_users_and_operators"
-down_revision = "0003_evidence"
+revision = "0004"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
 

@@ -1,4 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import { LoginPage } from './pages/Auth/LoginPage'
+import { UsersList } from './pages/Users/UsersList'
 import { Layout } from './components/Layout/Layout'
 import { Dashboard } from './pages/Dashboard'
 import { EngagementList } from './pages/Engagements/EngagementList'
@@ -24,45 +27,58 @@ import { JobsList } from './pages/Jobs/JobsList'
 import { JobDetailPage } from './pages/Jobs/JobDetail'
 import { InterfacesPage } from './pages/Interfaces/InterfacesPage'
 
+function ProtectedLayout() {
+  const { isAuthenticated } = useAuth()
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+  return <Layout />
+}
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          {/* Engagements */}
-          <Route path="/engagements" element={<EngagementList />} />
-          <Route path="/engagements/new" element={<EngagementCreate />} />
-          <Route path="/engagements/:id" element={<EngagementDetail />} />
-          {/* Discovery */}
-          <Route path="/discovery" element={<DiscoveryScan />} />
-          <Route path="/discovery/degraded" element={<DiscoveryDegraded />} />
-          {/* Handshakes / Validation */}
-          <Route path="/handshakes" element={<HandshakeList />} />
-          <Route path="/handshakes/:id" element={<HandshakeDetail />} />
-          <Route path="/validation" element={<ValidationPage />} />
-          <Route path="/validation/validate" element={<ValidateCapture />} />
-          {/* Cracking */}
-          <Route path="/cracking" element={<JobList />} />
-          <Route path="/cracking/:id" element={<JobDetail />} />
-          <Route path="/cracking/resources" element={<CrackingResources />} />
-          <Route path="/cracking/analyze/:artifactId" element={<CrackingAnalyze />} />
-          {/* Findings */}
-          <Route path="/findings" element={<FindingsList />} />
-          <Route path="/findings/new" element={<FindingsCreatePage />} />
-          <Route path="/findings/:id" element={<FindingDetail />} />
-          {/* Evidence */}
-          <Route path="/evidence" element={<EvidenceList />} />
-          <Route path="/evidence/:id" element={<EvidenceDetail />} />
-          {/* Jobs */}
-          <Route path="/jobs" element={<JobsList />} />
-          <Route path="/jobs/:id" element={<JobDetailPage />} />
-          {/* Interfaces */}
-          <Route path="/interfaces" element={<InterfacesPage />} />
-          {/* Tools */}
-          <Route path="/tools" element={<ToolsCheck />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<ProtectedLayout />}>
+            <Route path="/" element={<Dashboard />} />
+            {/* Users */}
+            <Route path="/users" element={<UsersList />} />
+            {/* Engagements */}
+            <Route path="/engagements" element={<EngagementList />} />
+            <Route path="/engagements/new" element={<EngagementCreate />} />
+            <Route path="/engagements/:id" element={<EngagementDetail />} />
+            {/* Discovery */}
+            <Route path="/discovery" element={<DiscoveryScan />} />
+            <Route path="/discovery/degraded" element={<DiscoveryDegraded />} />
+            {/* Handshakes / Validation */}
+            <Route path="/handshakes" element={<HandshakeList />} />
+            <Route path="/handshakes/:id" element={<HandshakeDetail />} />
+            <Route path="/validation" element={<ValidationPage />} />
+            <Route path="/validation/validate" element={<ValidateCapture />} />
+            {/* Cracking */}
+            <Route path="/cracking" element={<JobList />} />
+            <Route path="/cracking/:id" element={<JobDetail />} />
+            <Route path="/cracking/resources" element={<CrackingResources />} />
+            <Route path="/cracking/analyze/:artifactId" element={<CrackingAnalyze />} />
+            {/* Findings */}
+            <Route path="/findings" element={<FindingsList />} />
+            <Route path="/findings/new" element={<FindingsCreatePage />} />
+            <Route path="/findings/:id" element={<FindingDetail />} />
+            {/* Evidence */}
+            <Route path="/evidence" element={<EvidenceList />} />
+            <Route path="/evidence/:id" element={<EvidenceDetail />} />
+            {/* Jobs */}
+            <Route path="/jobs" element={<JobsList />} />
+            <Route path="/jobs/:id" element={<JobDetailPage />} />
+            {/* Interfaces */}
+            <Route path="/interfaces" element={<InterfacesPage />} />
+            {/* Tools */}
+            <Route path="/tools" element={<ToolsCheck />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
