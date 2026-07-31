@@ -336,25 +336,54 @@ export function DiscoveryScan() {
                   </tr>
                 </thead>
                 <tbody>
-                  {aps.map((ap, i) => (
-                    <tr key={`${ap.bssid}-${i}`}>
-                      <td style={{ fontWeight: 500, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ap.ssid || '<Oculto>'}
-                        {ap.degraded && <span className="badge badge-danger" style={{ marginLeft: 6, fontSize: 10 }}>degradado</span>}
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{ap.bssid}</td>
-                      <td>{ap.channel ?? '—'}</td>
-                      <td style={{ color: ap.signal != null && ap.signal > -70 ? 'var(--green)' : ap.signal != null && ap.signal > -85 ? 'var(--yellow)' : 'var(--text-muted)' }}>
-                        {ap.signal != null ? `${ap.signal} dBm` : '—'}
-                      </td>
-                      <td style={{ fontSize: 12 }}>{ap.protocol}</td>
-                      <td style={{ fontSize: 12 }}>{ap.band || '—'}</td>
-                      <td style={{ fontSize: 11, fontFamily: 'monospace' }}>{ap.akm || '—'}</td>
-                      <td>{ap.wps ? '✓' : '—'}</td>
-                      <td style={{ fontSize: 11 }}>{ap.pmf !== 'unknown' ? ap.pmf : '—'}</td>
-                      <td style={{ textAlign: 'center' }}>{ap.clients_count || '—'}</td>
-                    </tr>
-                  ))}
+                  {aps.map((ap, i) => {
+                    const signal = ap.signal ?? -100
+                    const percent = Math.max(0, Math.min(100, (signal + 100) * 2))
+                    const signalColor = signal > -65 ? 'var(--green)' : signal > -80 ? 'var(--yellow)' : 'var(--red)'
+                    
+                    return (
+                      <tr key={`${ap.bssid}-${i}`}>
+                        <td style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ color: ap.ssid ? 'var(--text-primary)' : 'var(--text-muted)', fontStyle: ap.ssid ? 'normal' : 'italic' }}>
+                            {ap.ssid || '<SSID Oculto>'}
+                          </span>
+                          {ap.degraded && <span className="badge badge-critical" style={{ marginLeft: 6, fontSize: 9 }}>degradado</span>}
+                        </td>
+                        <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--accent)' }}>{ap.bssid}</td>
+                        <td style={{ fontWeight: 700 }}>{ap.channel ?? '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 44, height: 6, background: 'var(--bg-tertiary)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ width: `${percent}%`, height: '100%', background: signalColor, borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: signalColor, fontFamily: 'JetBrains Mono, monospace' }}>
+                              {ap.signal != null ? `${ap.signal} dBm` : '—'}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`badge ${ap.protocol?.includes('WPA3') ? 'badge-info' : ap.protocol?.includes('WPA2') ? 'badge-open' : 'badge-draft'}`}>
+                            {ap.protocol || 'OPEN'}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{ap.band || '—'}</td>
+                        <td style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-muted)' }}>{ap.akm || '—'}</td>
+                        <td>
+                          {ap.wps ? (
+                            <span className="badge badge-medium" title="WPS Habilitado">WPS</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: 11 }}>
+                          <span className={`status-pill ${ap.pmf === 'required' ? 'active' : ap.pmf === 'optional' ? 'draft' : 'inactive'}`}>
+                            {ap.pmf !== 'unknown' ? ap.pmf : '—'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{ap.clients_count || 0}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

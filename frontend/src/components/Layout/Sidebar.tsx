@@ -55,7 +55,7 @@ export function Sidebar() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                end={item.to === '/'}
+                end={item.to === '/' || item.to === '/discovery'}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

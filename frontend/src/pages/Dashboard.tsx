@@ -54,26 +54,68 @@ export function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-4" style={{ marginBottom: 32 }}>
-        <div className="card stat-card">
-          <div className="stat-value" style={{ color: 'var(--accent)' }}>{data?.engagements?.length ?? 0}</div>
-          <div className="stat-label">Engagements</div>
-          <div className="stat-trend up">{activeEngagements.length} activos</div>
+        <div className="card stat-card" style={{ borderTop: '3px solid var(--accent)' }}>
+          <div className="flex-between">
+            <div>
+              <div className="stat-value" style={{ color: 'var(--accent)' }}>{data?.engagements?.length ?? 0}</div>
+              <div className="stat-label">Engagements</div>
+            </div>
+            <div style={{ background: 'var(--accent-bg)', padding: 10, borderRadius: 12, color: 'var(--accent)' }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+          </div>
+          <div className="stat-trend up">{activeEngagements.length} activos en ejecución</div>
         </div>
-        <div className="card stat-card">
-          <div className="stat-value" style={{ color: criticalOpen > 0 ? 'var(--red)' : 'var(--green)' }}>{criticalOpen}</div>
-          <div className="stat-label">Críticos abiertos</div>
+
+        <div className="card stat-card" style={{ borderTop: '3px solid var(--red)' }}>
+          <div className="flex-between">
+            <div>
+              <div className="stat-value" style={{ color: criticalOpen > 0 ? 'var(--red)' : 'var(--green)' }}>{criticalOpen}</div>
+              <div className="stat-label">Críticos abiertos</div>
+            </div>
+            <div style={{ background: 'var(--red-bg)', padding: 10, borderRadius: 12, color: 'var(--red)' }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+          </div>
           <div className="stat-trend" style={{ color: highOpen > 0 ? 'var(--orange)' : 'var(--text-muted)' }}>
-            {highOpen} altos
+            {highOpen} vulnerabilidades de severidad alta
           </div>
         </div>
-        <div className="card stat-card">
-          <div className="stat-value" style={{ color: 'var(--yellow)' }}>{data?.summary?.total ?? 0}</div>
-          <div className="stat-label">Hallazgos totales</div>
+
+        <div className="card stat-card" style={{ borderTop: '3px solid var(--yellow)' }}>
+          <div className="flex-between">
+            <div>
+              <div className="stat-value" style={{ color: 'var(--yellow)' }}>{data?.summary?.total ?? 0}</div>
+              <div className="stat-label">Hallazgos totales</div>
+            </div>
+            <div style={{ background: 'var(--yellow-bg)', padding: 10, borderRadius: 12, color: 'var(--yellow)' }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+            </div>
+          </div>
+          <div className="stat-trend" style={{ color: 'var(--text-muted)' }}>Registrados en auditoría activa</div>
         </div>
-        <div className="card stat-card">
-          <div className="stat-value" style={{ color: openJobs.length > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{openJobs.length}</div>
-          <div className="stat-label">Trabajos activos</div>
-          <div className="stat-trend up">{data?.crackingJobs?.length ?? 0} totales</div>
+
+        <div className="card stat-card" style={{ borderTop: '3px solid var(--purple)' }}>
+          <div className="flex-between">
+            <div>
+              <div className="stat-value" style={{ color: openJobs.length > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{openJobs.length}</div>
+              <div className="stat-label">Trabajos activos</div>
+            </div>
+            <div style={{ background: 'var(--purple-bg)', padding: 10, borderRadius: 12, color: 'var(--purple)' }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+          </div>
+          <div className="stat-trend up">{data?.crackingJobs?.length ?? 0} ejecutados en total</div>
         </div>
       </div>
 

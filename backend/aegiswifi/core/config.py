@@ -38,6 +38,8 @@ class SecurityConfig(BaseModel):
     # Clave Fernet en base64 para cifrar secretos en reposo. Si está vacío se
     # genera/persiste automáticamente en paths.data_dir/.aegis_key (ver core.security).
     encryption_key_b64: str | None = Field(default=None, repr=False)
+    # Contraseña sudo cifrada/almacenada para la ejecución de herramientas que requieren privilegios
+    sudo_password: str | None = Field(default=None, repr=False)
 
 
 class JobConfig(BaseModel):

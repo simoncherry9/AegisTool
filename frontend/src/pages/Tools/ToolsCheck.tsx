@@ -50,6 +50,9 @@ export function ToolsCheck() {
         </div>
       </div>
 
+      {/* Sudo Credential Card */}
+      <SudoConfigCard />
+
       {/* Summary badges */}
       <div className="grid grid-3" style={{ marginBottom: 24 }}>
         <div className="card stat-card" style={{ borderLeft: '3px solid var(--green)' }}>
@@ -118,6 +121,81 @@ export function ToolsCheck() {
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+function SudoConfigCard() {
+  const [sudoPass, setSudoPass] = useState('')
+  const [configured, setConfigured] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/v1/tools/sudo-status')
+      .then(res => res.json())
+      .then(data => {
+        if (data.configured) setConfigured(true)
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!sudoPass) return
+    setLoading(true)
+    setMessage(null)
+
+    try {
+      const res = await fetch('/api/v1/tools/sudo-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: sudoPass }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setConfigured(true)
+        setSudoPass('')
+        setMessage('Contraseña sudo de Kali cifrada y almacenada correctamente.')
+      } else {
+        setMessage(data.detail || 'Error al guardar contraseña')
+      }
+    } catch {
+      setMessage('Error al conectar con el servidor')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 24, borderLeft: '3px solid var(--purple)' }}>
+      <div className="card-header">
+        <div>
+          <div className="card-title">Configuración de Privilegios Elevados (sudo Kali)</div>
+          <div className="card-subtitle">
+            Almacenamiento cifrado de la clave sudo para ejecutar adaptadores que requieren el helper privilegiado.
+          </div>
+        </div>
+        <span className={`status-pill ${configured ? 'active' : 'inactive'}`}>
+          {configured ? '✓ Configurado (Cifrado)' : 'Sin Configurar'}
+        </span>
+      </div>
+      <div style={{ padding: '0 16px 16px' }}>
+        {message && <div className="callout callout-info" style={{ marginBottom: 12 }}>{message}</div>}
+        <form onSubmit={handleSave} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <input
+            type="password"
+            className="form-input"
+            placeholder="Contraseña sudo de Kali Linux"
+            value={sudoPass}
+            onChange={(e) => setSudoPass(e.target.value)}
+            style={{ maxWidth: 320 }}
+          />
+          <button type="submit" className="btn btn-primary" disabled={loading || !sudoPass}>
+            {loading ? 'Guardando...' : configured ? 'Actualizar Contraseña' : 'Guardar Contraseña'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

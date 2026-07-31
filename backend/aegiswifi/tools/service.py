@@ -42,12 +42,6 @@ TOOLS_DEFINITIONS: list[dict] = [
         "description": "Conversión de capturas a hashes 22000",
         "category": "capture",
     },
-    {
-        "name": "hcxpcaptool",
-        "binary": "hcxpcaptool",
-        "description": "Conversión de capturas (legacy)",
-        "category": "capture",
-    },
     # === Cracking ===
     {
         "name": "hashcat",
