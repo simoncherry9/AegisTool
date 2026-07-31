@@ -1,0 +1,45 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- SQLite / runtime data ---
+*.db
+*.db-journal
+*.sqlite3
+data/
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+.vite/
+
+# --- Env / secrets ---
+.env
+*.local
+
+# --- Evidence & hashes (never commit) ---
+*.pcap
+*.pcapng
+*.22000
+*.hccapx
+captures/
+hashes/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
