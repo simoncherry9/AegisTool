@@ -13,6 +13,7 @@ class EngagementBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     client: str = Field(..., min_length=1, max_length=255)
     operator: str = Field(..., min_length=1, max_length=255)
+    operator_id: int | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
     authorization_reference: str | None = Field(default=None, max_length=255)
@@ -29,6 +30,8 @@ class EngagementUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     notes: str | None = None
     status: EngagementStatus | None = None
+    operator_id: int | None = None
+    operator: str | None = Field(default=None, min_length=1, max_length=255)
     end_date: datetime | None = None
 
 
@@ -40,6 +43,7 @@ class EngagementRead(BaseModel):
     name: str
     client: str
     operator: str
+    operator_id: int | None = None
     status: EngagementStatus
     start_date: datetime | None
     end_date: datetime | None
@@ -49,3 +53,4 @@ class EngagementRead(BaseModel):
     notes: str | None
     created_at: datetime
     updated_at: datetime
+

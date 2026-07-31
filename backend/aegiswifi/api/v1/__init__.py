@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from aegiswifi.api.v1 import engagements, health, jobs
+from aegiswifi.api.v1 import auth, engagements, health, jobs, users
 from aegiswifi.discovery import api as discovery_api
 from aegiswifi.evidence import api as evidence_api
 from aegiswifi.cracking import api as cracking_api
@@ -14,6 +14,8 @@ from aegiswifi.findings import api as findings_api
 from aegiswifi.tools import api as tools_api
 
 api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(auth.router)
+api_router.include_router(users.router)
 api_router.include_router(health.router)
 api_router.include_router(engagements.router)
 api_router.include_router(jobs.router)

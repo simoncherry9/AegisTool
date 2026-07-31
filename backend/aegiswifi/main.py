@@ -31,6 +31,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Inicializar sistema de trabajos (JobManager + EventBus).
     event_bus = get_event_bus(buffer_size=settings.jobs.event_buffer_size)
     session_factory = get_sessionmaker()
+    with session_factory() as db:
+        try:
+            from aegiswifi.users.service import seed_default_admin
+            seed_default_admin(db)
+        except Exception as exc:
+            log.warning("default admin seed failed", error=str(exc))
+
     try:
         manager = JobManager(
             session_factory=session_factory,

@@ -95,7 +95,27 @@ class FindingStatus(StrEnum):
     ACCEPTED_RISK = "ACCEPTED_RISK"
 
 
+class UserRole(StrEnum):
+    ADMIN = "ADMIN"
+    OPERATOR = "OPERATOR"
+    AUDITOR = "AUDITOR"
+
+
 # --- Entidades (minuta §28) --------------------------------------------------
+
+
+class User(TimestampMixin, Base):
+    """Usuario del sistema para autenticación y asignación de engagements."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default=UserRole.OPERATOR)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class Engagement(TimestampMixin, Base):
@@ -119,6 +139,11 @@ class Engagement(TimestampMixin, Base):
     permissions: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     limits: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+
+    operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    operator_user: Mapped[User | None] = relationship("User")
 
     jobs: Mapped[list[Job]] = relationship(
         back_populates="engagement", cascade="all, delete-orphan"

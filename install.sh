@@ -50,20 +50,22 @@ if [[ ! -d "$VENV_DIR" ]]; then
   log "creando virtualenv en $VENV_DIR…"
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+
+PY_VENV="$VENV_DIR/bin/python"
+PIP_VENV="$VENV_DIR/bin/pip"
+ALEMBIC_VENV="$VENV_DIR/bin/alembic"
 
 log "actualizando pip…"
-pip install --upgrade pip --quiet
+"$PIP_VENV" install --upgrade pip --quiet
 
 log "instalando backend (editable)…"
-pip install -e "$REPO[dev]" --quiet
+"$PIP_VENV" install -e "$REPO" --quiet
 
 # ─── 3. .env con Fernet key autogenerada ─────────────────────────────────────
 ENV_FILE="$REPO/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
   log "generando .env con clave Fernet…"
-  FERNET_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+  FERNET_KEY=$("$PY_VENV" -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
   cat > "$ENV_FILE" <<ENVEOF
 # AegisWiFi — generado automáticamente por install.sh
 AEGISWIFI_ENVIRONMENT=development
@@ -107,7 +109,7 @@ fi
 
 # ─── 6. Migraciones ──────────────────────────────────────────────────────────
 log "aplicando migraciones de base de datos…"
-if "$VENV_DIR/bin/alembic" -c "$REPO/backend/alembic.ini" upgrade head 2>/dev/null; then
+if (cd "$REPO" && "$ALEMBIC_VENV" -c "$REPO/backend/alembic.ini" upgrade head); then
   ok "migraciones aplicadas"
 else
   warn "alembic falló — ejecuta: source .venv/bin/activate && alembic -c backend/alembic.ini upgrade head"
@@ -115,7 +117,7 @@ fi
 
 # ─── 7. Diagnóstico ──────────────────────────────────────────────────────────
 log "verificando instalación…"
-python -c "import aegiswifi; print('  aegiswifi', aegiswifi.__version__)" 2>/dev/null \
+"$PY_VENV" -c "import aegiswifi; print('  aegiswifi', aegiswifi.__version__)" 2>/dev/null \
   && ok "backend importable" \
   || err "no se pudo importar aegiswifi"
 

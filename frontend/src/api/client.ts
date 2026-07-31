@@ -8,11 +8,21 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('aegis_token')
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders, ...init?.headers },
     ...init,
   })
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/auth/login')) {
+      localStorage.removeItem('aegis_token')
+      localStorage.removeItem('aegis_user')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
     const body = await res.text().catch(() => '')
     throw new ApiError(res.status, body || res.statusText)
   }

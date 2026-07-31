@@ -35,11 +35,19 @@ def generate_code(session: Session, *, year: int | None = None) -> str:
 
 
 def create_engagement(session: Session, payload: EngagementCreate) -> Engagement:
+    operator_name = payload.operator
+    if payload.operator_id:
+        from aegiswifi.database.models import User
+        user = session.get(User, payload.operator_id)
+        if user:
+            operator_name = user.full_name or user.username
+
     engagement = Engagement(
         code=generate_code(session),
         name=payload.name,
         client=payload.client,
-        operator=payload.operator,
+        operator=operator_name,
+        operator_id=payload.operator_id,
         status=EngagementStatus.DRAFT,
         start_date=payload.start_date,
         end_date=payload.end_date,
