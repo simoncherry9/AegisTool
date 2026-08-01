@@ -90,6 +90,30 @@ async def run_privileged_cmd(
         return "", str(exc), -1
 
 
+async def run_ip_privileged(args: list[str], timeout: int = 10) -> tuple[str, str]:
+    """Ejecuta ``ip`` con privilegios elevados para modificaciones de red."""
+    stdout, stderr, _ = await run_privileged_cmd(["ip"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_iw_privileged(args: list[str], timeout: int = 15) -> tuple[str, str]:
+    """Ejecuta ``iw`` con privilegios elevados para modificaciones de interfaz."""
+    stdout, stderr, _ = await run_privileged_cmd(["iw"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_airmon_privileged(args: list[str], timeout: int = 15) -> tuple[str, str]:
+    """Ejecuta ``airmon-ng`` con privilegios elevados."""
+    stdout, stderr, _ = await run_privileged_cmd(["airmon-ng"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_aireplay_privileged(args: list[str], timeout: int = 15) -> tuple[str, str]:
+    """Ejecuta ``aireplay-ng`` con privilegios elevados."""
+    stdout, stderr, _ = await run_privileged_cmd(["aireplay-ng"] + args, timeout=timeout)
+    return stdout, stderr
+
+
 async def spawn_privileged_process(
     cmd: list[str],
 ) -> asyncio.subprocess.Process | None:

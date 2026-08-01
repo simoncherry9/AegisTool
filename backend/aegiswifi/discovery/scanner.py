@@ -64,9 +64,9 @@ class AirodumpScanner:
         """Inicia airodump-ng en background con privilegios sudo/root."""
         self._started_at = asyncio.get_event_loop().time()
 
+        # Opciones primero, interfaz como último argumento para máxima compatibilidad
         args = [
             "airodump-ng",
-            self.interface,
             "--write", self._output_prefix,
             "--write-interval", str(_WRITE_INTERVAL),
             "--output-format", "csv",
@@ -75,10 +75,31 @@ class AirodumpScanner:
             args.extend(["--channel", str(channel)])
             self._channel = channel
 
+        args.append(self.interface)
+
         self._process = await self._spawn_process(args)
 
         if self._process is None:
             log.error("failed to start airodump-ng", interface=self.interface)
+            return False
+
+        # Esperar 0.5s y verificar que el proceso no haya muerto en el arranque (permisos, sudo, canal, etc.)
+        await asyncio.sleep(0.5)
+        if self._process.returncode is not None:
+            stderr = ""
+            if self._process.stderr:
+                try:
+                    err_bytes = await asyncio.wait_for(self._process.stderr.read(), timeout=1.0)
+                    stderr = err_bytes.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+            log.error(
+                "airodump-ng exited during startup",
+                interface=self.interface,
+                returncode=self._process.returncode,
+                stderr=stderr,
+            )
+            self._process = None
             return False
 
         self.running = True
@@ -150,6 +171,24 @@ class AirodumpScanner:
         while self.running:
             try:
                 await asyncio.sleep(_CSV_POLL_INTERVAL)
+
+                # Verificar si el subproceso de airodump-ng ha terminado inesperadamente
+                if self._process and self._process.returncode is not None:
+                    stderr = ""
+                    if self._process.stderr:
+                        try:
+                            err_bytes = await self._process.stderr.read()
+                            stderr = err_bytes.decode("utf-8", errors="replace").strip()
+                        except Exception:
+                            pass
+                    log.error(
+                        "airodump-ng process exited unexpectedly",
+                        interface=self.interface,
+                        returncode=self._process.returncode,
+                        stderr=stderr,
+                    )
+                    self.running = False
+                    break
 
                 if not csv_path.exists():
                     continue

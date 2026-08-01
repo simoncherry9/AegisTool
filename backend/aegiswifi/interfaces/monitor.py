@@ -13,53 +13,34 @@ from structlog import get_logger
 
 from aegiswifi.interfaces.detection import _run_iw, get_phy_info
 
+from aegiswifi.core.privileged import (
+    run_aireplay_privileged,
+    run_airmon_privileged,
+    run_ip_privileged,
+    run_iw_privileged,
+)
+
 log = get_logger(__name__)
 
 
 async def _run_aireplay(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``aireplay-ng``. Retorna ``("", err)`` si falla."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "aireplay-ng",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return "", "timeout"
-        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
-    except FileNotFoundError:
-        return "", "aireplay-ng: command not found"
-    except OSError as exc:
-        log.warning("aireplay-ng execution error", error=str(exc))
-        return "", str(exc)
+    """Ejecuta ``aireplay-ng`` con privilegios sudo/root."""
+    return await run_aireplay_privileged(args, timeout=timeout)
 
 
 async def _run_ip(args: list[str], timeout: int = 10) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``ip``. Retorna ``("", err)`` si falla."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ip",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return "", "timeout"
-        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
-    except FileNotFoundError:
-        return "", "ip: command not found"
-    except OSError as exc:
-        log.warning("ip execution error", error=str(exc))
-        return "", str(exc)
+    """Ejecuta ``ip`` con privilegios sudo/root para modificaciones de interfaz."""
+    return await run_ip_privileged(args, timeout=timeout)
+
+
+async def _run_airmon(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
+    """Ejecuta ``airmon-ng`` con privilegios sudo/root."""
+    return await run_airmon_privileged(args, timeout=timeout)
+
+
+async def _run_iw_mutating(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
+    """Ejecuta ``iw`` con privilegios sudo/root para operaciones que modifican estado."""
+    return await run_iw_privileged(args, timeout=timeout)
 
 
 # ── Capability checks ──────────────────────────────────────────────
@@ -170,9 +151,9 @@ async def enable_monitor_mode(interface: str) -> str:
 
     # 2. Estrategia directa ip link down + iw set monitor + ip link up
     await _run_ip(["link", "set", interface, "down"])
-    stdout, stderr = await _run_iw(["dev", interface, "set", "type", "monitor"])
+    stdout, stderr = await _run_iw_mutating(["dev", interface, "set", "type", "monitor"])
     if stderr and ("command failed" in stderr.lower() or "not permitted" in stderr.lower()):
-        stdout, stderr = await _run_iw(["dev", interface, "set", "monitor", "control"])
+        stdout, stderr = await _run_iw_mutating(["dev", interface, "set", "monitor", "control"])
 
     await _run_ip(["link", "set", interface, "up"])
 
@@ -182,7 +163,7 @@ async def enable_monitor_mode(interface: str) -> str:
 
     # 3. Estrategia interfaz virtual
     mon_name = f"{interface}mon"
-    stdout, stderr = await _run_iw(["dev", interface, "interface", "add", mon_name, "type", "monitor"])
+    stdout, stderr = await _run_iw_mutating(["dev", interface, "interface", "add", mon_name, "type", "monitor"])
     if stderr and "command failed" in stderr.lower():
         raise RuntimeError(f"no se pudo activar monitor mode en {interface}: {stderr.strip()}")
     await _run_ip(["link", "set", mon_name, "up"])
@@ -194,7 +175,7 @@ async def disable_monitor_mode(interface: str) -> None:
     """Desactiva monitor mode volviendo a modo managed."""
     await _run_airmon(["stop", interface])
     await _run_ip(["link", "set", interface, "down"])
-    stdout, stderr = await _run_iw(["dev", interface, "set", "type", "managed"])
+    stdout, stderr = await _run_iw_mutating(["dev", interface, "set", "type", "managed"])
     if stderr and "command failed" in stderr.lower():
         raise RuntimeError(f"no se pudo desactivar monitor mode en {interface}: {stderr.strip()}")
     await _run_ip(["link", "set", interface, "up"])
@@ -216,7 +197,7 @@ async def create_virtual_monitor(physical: str, name: str | None = None) -> str:
         RuntimeError: Si no se puede crear la interfaz virtual.
     """
     mon_name = name or f"{physical}mon"
-    stdout, stderr = await _run_iw(
+    stdout, stderr = await _run_iw_mutating(
         [
             "dev",
             physical,
@@ -245,7 +226,7 @@ async def remove_virtual_interface(name: str) -> None:
     Raises:
         RuntimeError: Si no se puede eliminar.
     """
-    stdout, stderr = await _run_iw(["dev", name, "del"])
+    stdout, stderr = await _run_iw_mutating(["dev", name, "del"])
     if stderr and "command failed" in stderr.lower():
         raise RuntimeError(f"no se pudo eliminar interfaz virtual {name}: {stderr.strip()}")
     log.info("virtual interface removed", interface=name)
