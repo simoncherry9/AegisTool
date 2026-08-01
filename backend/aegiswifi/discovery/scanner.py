@@ -27,6 +27,9 @@ _WRITE_INTERVAL = 2  # segundos entre escrituras CSV
 _CSV_POLL_INTERVAL = 2.0  # segundos entre polls
 
 
+from aegiswifi.core.privileged import run_privileged_cmd, spawn_privileged_process
+
+
 # ── Scanner ─────────────────────────────────────────────────────────
 
 
@@ -58,15 +61,7 @@ class AirodumpScanner:
         self._started_at: float | None = None
 
     async def start(self, *, channel: int | None = None) -> bool:
-        """Inicia airodump-ng en background.
-
-        Args:
-            channel: Canal fijo al que sintonizar (opcional). Si se
-                     omite, airodump hacecio hopping automático.
-
-        Returns:
-            ``True`` si el escáner arrancó correctamente.
-        """
+        """Inicia airodump-ng en background con privilegios sudo/root."""
         self._started_at = asyncio.get_event_loop().time()
 
         args = [
@@ -80,10 +75,6 @@ class AirodumpScanner:
             args.extend(["--channel", str(channel)])
             self._channel = channel
 
-        stdout, stderr = await _run_airodump(args)
-
-        # _run_airodump returns immediately — it's a mock check
-        # We need to actually spawn the subprocess
         self._process = await self._spawn_process(args)
 
         if self._process is None:
@@ -123,11 +114,7 @@ class AirodumpScanner:
         log.info("airodump-ng stopped", interface=self.interface)
 
     async def set_channel(self, channel: int) -> None:
-        """Cambia el canal de escaneo.
-
-        Si el escáner está activo, mata el proceso actual y
-        lo reinicia en el nuevo canal.
-        """
+        """Cambia el canal de escaneo."""
         was_running = self.running
         if was_running:
             await self.stop()
@@ -149,20 +136,12 @@ class AirodumpScanner:
         self,
         args: list[str],
     ) -> asyncio.subprocess.Process | None:
-        """Spawn del subproceso airodump-ng."""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            return process
-        except FileNotFoundError:
-            log.error("airodump-ng not found", interface=self.interface)
+        """Spawn del subproceso airodump-ng con sudo/root."""
+        process = await spawn_privileged_process(args)
+        if process is None:
+            log.error("airodump-ng spawn failed", interface=self.interface)
             return None
-        except OSError as exc:
-            log.error("failed to spawn airodump-ng", error=str(exc))
-            return None
+        return process
 
     async def _poll_csv(self) -> None:
         """Poll del archivo CSV cada N segundos mientras corre."""

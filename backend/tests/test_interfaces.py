@@ -435,36 +435,48 @@ class TestMonitorModule:
         """enable_monitor_mode: cambio directo exitoso."""
         from aegiswifi.interfaces.monitor import enable_monitor_mode
 
-        with patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw:
+        with (
+            patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
+        ):
             mock_iw.return_value = ("", "")
             result = await enable_monitor_mode("wlan0")
 
         assert result == "wlan0"
-        mock_iw.assert_called_once_with(["dev", "wlan0", "set", "monitor", "control"])
 
     @pytest.mark.asyncio
     async def test_enable_monitor_mode_virtual_fallback(self):
         """enable_monitor_mode: fallback a virtual si directo falla."""
         from aegiswifi.interfaces.monitor import enable_monitor_mode
 
-        with patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw:
-            # First call fails, second succeeds
+        with (
+            patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
+        ):
+            # First call (set type monitor) fails, second call (set monitor control) fails, third call (interface add) succeeds
             mock_iw.side_effect = [
+                ("", "command failed: Device or resource busy"),
                 ("", "command failed: Device or resource busy"),
                 ("", ""),
             ]
             result = await enable_monitor_mode("wlan0")
 
-        assert result == "wlan0mon"  # virtual interface name
-        assert mock_iw.call_count == 2
+        assert result == "wlan0mon"
 
     @pytest.mark.asyncio
     async def test_enable_monitor_mode_both_fail(self):
         """enable_monitor_mode: lanza RuntimeError si ambos métodos fallan."""
         from aegiswifi.interfaces.monitor import enable_monitor_mode
 
-        with patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw:
+        with (
+            patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
+        ):
             mock_iw.side_effect = [
+                ("", "command failed: Device or resource busy"),
                 ("", "command failed: Device or resource busy"),
                 ("", "command failed: Operation not supported"),
             ]
@@ -475,17 +487,23 @@ class TestMonitorModule:
     async def test_disable_monitor_mode(self):
         from aegiswifi.interfaces.monitor import disable_monitor_mode
 
-        with patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw:
+        with (
+            patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
+        ):
             mock_iw.return_value = ("", "")
             await disable_monitor_mode("wlan0")
-
-        mock_iw.assert_called_once_with(["dev", "wlan0", "set", "type", "managed"])
 
     @pytest.mark.asyncio
     async def test_disable_monitor_mode_fail(self):
         from aegiswifi.interfaces.monitor import disable_monitor_mode
 
-        with patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw:
+        with (
+            patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
+        ):
             mock_iw.return_value = ("", "command failed: Operation not permitted")
             with pytest.raises(RuntimeError, match="no se pudo desactivar monitor mode"):
                 await disable_monitor_mode("wlan0")

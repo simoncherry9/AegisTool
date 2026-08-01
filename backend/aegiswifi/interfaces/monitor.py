@@ -113,60 +113,74 @@ async def list_channels_for_band(phy: str, band_name: str) -> list[int]:
 # ── Monitor mode ───────────────────────────────────────────────────
 
 
+from aegiswifi.core.privileged import run_privileged_cmd
+
+
+async def _run_airmon(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
+    """Ejecuta ``airmon-ng`` con privilegios elevados."""
+    stdout, stderr, _ = await run_privileged_cmd(["airmon-ng"] + args, timeout=timeout)
+    return stdout, stderr
+
+
 async def enable_monitor_mode(interface: str) -> str:
     """Activa monitor mode en la interfaz.
 
     Estrategia:
-    1. Intenta ``iw dev <iface> set monitor control`` (cambio directo).
-    2. Si falla, crea una interfaz virtual ``<iface>mon`` de tipo monitor.
-
-    Args:
-        interface: Nombre de la interfaz (ej. ``wlan0``).
-
-    Returns:
-        Nombre de la interfaz que está en monitor mode (puede ser la misma
-        o una virtual recién creada).
-
-    Raises:
-        RuntimeError: Si no se puede activar monitor mode.
+    1. Ejecuta ``airmon-ng check kill`` y ``airmon-ng start <iface>`` (con sudo).
+    2. Si airmon-ng no está disponible, realiza cambio manual vía ``ip link down``,
+       ``iw set type monitor`` e ``ip link up``.
+    3. Si falla, crea interfaz virtual ``<iface>mon``.
     """
-    # First attempt: direct switch
-    stdout, stderr = await _run_iw(["dev", interface, "set", "monitor", "control"])
-    if not stderr or "command failed" not in stderr.lower():
-        log.info("monitor mode enabled", interface=interface)
+    # 1. Estrategia principal con airmon-ng (estándar en Kali Linux)
+    await _run_airmon(["check", "kill"])
+    airout, airerr = await _run_airmon(["start", interface])
+
+    if airout and ("monitor mode" in airout.lower() or "enabled" in airout.lower()):
+        import re
+
+        m = re.search(r"monitor mode (?:enabled|started) (?:on|for)\s+([a-zA-Z0-9_\-]+)", airout, re.IGNORECASE)
+        if m:
+            mon_iface = m.group(1).rstrip(")")
+            log.info("airmon-ng monitor mode enabled", interface=mon_iface)
+            return mon_iface
+
+        # Si airmon-ng creó <iface>mon o usó la misma
+        mon_candidate = f"{interface}mon"
+        iw_out, _ = await _run_iw(["dev"])
+        if mon_candidate in iw_out:
+            return mon_candidate
         return interface
 
-    # Second attempt: create virtual monitor
+    # 2. Estrategia directa ip link down + iw set monitor + ip link up
+    await _run_ip(["link", "set", interface, "down"])
+    stdout, stderr = await _run_iw(["dev", interface, "set", "type", "monitor"])
+    if stderr and ("command failed" in stderr.lower() or "not permitted" in stderr.lower()):
+        stdout, stderr = await _run_iw(["dev", interface, "set", "monitor", "control"])
+
+    await _run_ip(["link", "set", interface, "up"])
+
+    if not stderr or "command failed" not in stderr.lower():
+        log.info("monitor mode enabled via iw", interface=interface)
+        return interface
+
+    # 3. Estrategia interfaz virtual
     mon_name = f"{interface}mon"
-    stdout, stderr = await _run_iw(
-        [
-            "dev",
-            interface,
-            "interface",
-            "add",
-            mon_name,
-            "type",
-            "monitor",
-        ]
-    )
+    stdout, stderr = await _run_iw(["dev", interface, "interface", "add", mon_name, "type", "monitor"])
     if stderr and "command failed" in stderr.lower():
         raise RuntimeError(f"no se pudo activar monitor mode en {interface}: {stderr.strip()}")
+    await _run_ip(["link", "set", mon_name, "up"])
     log.info("virtual monitor interface created", physical=interface, monitor=mon_name)
     return mon_name
 
 
 async def disable_monitor_mode(interface: str) -> None:
-    """Desactiva monitor mode volviendo a modo managed.
-
-    Args:
-        interface: Nombre de la interfaz (puede ser física o virtual).
-
-    Raises:
-        RuntimeError: Si no se puede restaurar a modo managed.
-    """
+    """Desactiva monitor mode volviendo a modo managed."""
+    await _run_airmon(["stop", interface])
+    await _run_ip(["link", "set", interface, "down"])
     stdout, stderr = await _run_iw(["dev", interface, "set", "type", "managed"])
     if stderr and "command failed" in stderr.lower():
         raise RuntimeError(f"no se pudo desactivar monitor mode en {interface}: {stderr.strip()}")
+    await _run_ip(["link", "set", interface, "up"])
     log.info("monitor mode disabled", interface=interface)
 
 

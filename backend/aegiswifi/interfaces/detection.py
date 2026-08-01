@@ -54,61 +54,21 @@ _RE_ETHTOOL_DRIVER = re.compile(r"driver:\s+(?P<driver>\S+)", re.MULTILINE)
 _RE_ETHTOOL_VERSION = re.compile(r"version:\s+(?P<version>\S+)", re.MULTILINE)
 
 
+from aegiswifi.core.privileged import run_privileged_cmd
+
 # ── Subprocess wrappers (mockeables) ───────────────────────────────
 
 
 async def _run_iw(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``iw`` con los argumentos dados.
-
-    Returns:
-        ``(stdout, stderr)``. Si ``iw`` no está instalado o falla,
-        retorna ``("", "command not found")``.
-    """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "iw",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return "", "timeout"
-        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
-    except FileNotFoundError:
-        return "", "iw: command not found"
-    except OSError as exc:
-        log.warning("iw execution error", error=str(exc))
-        return "", str(exc)
+    """Ejecuta ``iw`` con los argumentos dados a través del runner privilegiado."""
+    stdout, stderr, _ = await run_privileged_cmd(["iw"] + args, timeout=timeout)
+    return stdout, stderr
 
 
 async def _run_ethtool(args: list[str], timeout: int = 10) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``ethtool`` con los argumentos dados.
-
-    Retorna ``("", err)`` si no está instalado o falla.
-    """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ethtool",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return "", "timeout"
-        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
-    except FileNotFoundError:
-        return "", "ethtool: command not found"
-    except OSError as exc:
-        log.warning("ethtool execution error", error=str(exc))
-        return "", str(exc)
+    """Ejecuta ``ethtool`` con los argumentos dados a través del runner privilegiado."""
+    stdout, stderr, _ = await run_privileged_cmd(["ethtool"] + args, timeout=timeout)
+    return stdout, stderr
 
 
 async def _run_airmon(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
