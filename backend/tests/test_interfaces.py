@@ -455,8 +455,12 @@ class TestMonitorModule:
             patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
             patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
         ):
-            # First call (set type monitor) fails, second call (set monitor control) fails, third call (interface add) succeeds
+            # 1: iw dev (pre-check, return empty so not already monitor)
+            # 2: set type monitor (fails)
+            # 3: set monitor control (fails)
+            # 4: interface add (succeeds)
             mock_iw.side_effect = [
+                ("", ""),
                 ("", "command failed: Device or resource busy"),
                 ("", "command failed: Device or resource busy"),
                 ("", ""),
@@ -476,6 +480,7 @@ class TestMonitorModule:
             patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock) as mock_iw,
         ):
             mock_iw.side_effect = [
+                ("", ""),
                 ("", "command failed: Device or resource busy"),
                 ("", "command failed: Device or resource busy"),
                 ("", "command failed: Operation not supported"),

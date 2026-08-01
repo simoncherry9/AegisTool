@@ -80,10 +80,15 @@ async def prepare_interface(name: str, *, create_virtual: bool = False) -> Inter
     Raises:
         RuntimeError: Si la interfaz no existe o no se puede preparar.
     """
-    # 1. Verify interface exists
+    # 1. Verify interface exists (or check if it was renamed to <name>mon)
     iface = await get_interface_details(name)
     if iface is None:
-        raise RuntimeError(f"interfaz {name} no encontrada")
+        alt_name = f"{name}mon"
+        iface = await get_interface_details(alt_name)
+        if iface is not None:
+            name = alt_name
+        else:
+            raise RuntimeError(f"interfaz '{name}' no encontrada")
 
     # 2. Capture current state
     state = await capture_current_state(name)

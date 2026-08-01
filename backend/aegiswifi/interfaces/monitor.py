@@ -126,14 +126,32 @@ async def enable_monitor_mode(interface: str) -> str:
     """Activa monitor mode en la interfaz.
 
     Estrategia:
+    0. Si la interfaz (o <iface>mon) ya está en modo monitor, la retorna de inmediato.
     1. Ejecuta ``airmon-ng check kill`` y ``airmon-ng start <iface>`` (con sudo).
     2. Si airmon-ng no está disponible, realiza cambio manual vía ``ip link down``,
        ``iw set type monitor`` e ``ip link up``.
     3. Si falla, crea interfaz virtual ``<iface>mon``.
     """
+    # 0. Verificar si ya se encuentra en modo monitor
+    iw_dev_init, _ = await _run_iw(["dev"])
+    if f"Interface {interface}" in iw_dev_init and "type monitor" in iw_dev_init:
+        log.info("interface is already in monitor mode", interface=interface)
+        return interface
+
+    mon_candidate = f"{interface}mon"
+    if f"Interface {mon_candidate}" in iw_dev_init and "type monitor" in iw_dev_init:
+        log.info("virtual/renamed monitor interface already active", interface=mon_candidate)
+        return mon_candidate
+
     # 1. Estrategia principal con airmon-ng (estándar en Kali Linux)
     await _run_airmon(["check", "kill"])
     airout, airerr = await _run_airmon(["start", interface])
+
+    if "password is required" in (airout + airerr).lower() or "a password is required" in (airout + airerr).lower():
+        raise RuntimeError(
+            f"Se requieren privilegios sudo para preparar {interface}. "
+            "Por favor ingresa la contraseña sudo de Kali en la sección 'Herramientas del Sistema'."
+        )
 
     if airout and ("monitor mode" in airout.lower() or "enabled" in airout.lower()):
         import re
@@ -145,7 +163,6 @@ async def enable_monitor_mode(interface: str) -> str:
             return mon_iface
 
         # Si airmon-ng creó <iface>mon o usó la misma
-        mon_candidate = f"{interface}mon"
         iw_out, _ = await _run_iw(["dev"])
         if mon_candidate in iw_out:
             return mon_candidate
