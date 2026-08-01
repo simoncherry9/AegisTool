@@ -26,6 +26,11 @@ import { EvidenceDetail } from './pages/Evidence/EvidenceDetail'
 import { JobsList } from './pages/Jobs/JobsList'
 import { JobDetailPage } from './pages/Jobs/JobDetail'
 import { InterfacesPage } from './pages/Interfaces/InterfacesPage'
+import { APDetail } from './pages/Discovery/APDetail'
+import { ClientDetail } from './pages/Discovery/ClientDetail'
+import { DeauthPage } from './pages/Deauth/DeauthPage'
+import { WPSPage } from './pages/WPS/WPSPage'
+import { ReportingPage } from './pages/Reporting/ReportingPage'
 
 function ProtectedLayout() {
   const { isAuthenticated } = useAuth()
@@ -52,6 +57,11 @@ export default function App() {
             {/* Discovery */}
             <Route path="/discovery" element={<DiscoveryScan />} />
             <Route path="/discovery/degraded" element={<DiscoveryDegraded />} />
+            <Route path="/discovery/ap/:bssid" element={<APDetail />} />
+            <Route path="/discovery/client/:mac" element={<ClientDetail />} />
+            {/* Attack Pages */}
+            <Route path="/deauth" element={<DeauthPage />} />
+            <Route path="/wps" element={<WPSPage />} />
             {/* Handshakes / Validation */}
             <Route path="/handshakes" element={<HandshakeList />} />
             <Route path="/handshakes/:id" element={<HandshakeDetail />} />
@@ -76,6 +86,8 @@ export default function App() {
             <Route path="/interfaces" element={<InterfacesPage />} />
             {/* Tools */}
             <Route path="/tools" element={<ToolsCheck />} />
+            {/* Reporting */}
+            <Route path="/reports" element={<ReportingPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

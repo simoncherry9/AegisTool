@@ -13,6 +13,12 @@ from aegiswifi.validation import api as validation_api
 from aegiswifi.findings import api as findings_api
 from aegiswifi.tools import api as tools_api
 
+from aegiswifi.handshake import api as handshake_api
+from aegiswifi.pmkid import api as pmkid_api
+from aegiswifi.deauth import api as deauth_api
+from aegiswifi.wps import api as wps_api
+from aegiswifi.reporting import api as reporting_api
+
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
@@ -28,5 +34,11 @@ api_router.include_router(findings_api.router)
 api_router.include_router(discovery_api.router)
 api_router.include_router(discovery_api.ws_router)
 api_router.include_router(tools_api.router)
+api_router.include_router(handshake_api.router)
+api_router.include_router(pmkid_api.router)
+api_router.include_router(deauth_api.router)
+api_router.include_router(wps_api.router)
+api_router.include_router(reporting_api.router)
 
 __all__ = ["api_router"]
+

@@ -70,6 +70,11 @@ class StartJobResponse(BaseModel):
 # ===================================================================
 
 
+class CustomWordlistCreate(BaseModel):
+    name: str
+    words: list[str]
+
+
 @router.get("/dictionaries", response_model=list[DictionaryInfo])
 def list_dictionaries(
     force_rescan: bool = Query(False),
@@ -78,12 +83,61 @@ def list_dictionaries(
     return _dict_manager.scan_all(force=force_rescan)
 
 
+@router.post("/dictionaries/custom", response_model=DictionaryInfo, status_code=status.HTTP_201_CREATED)
+def create_custom_dictionary(body: CustomWordlistCreate) -> DictionaryInfo:
+    """Crea un diccionario de palabras personalizado."""
+    if not body.words:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La lista de palabras no puede estar vacía")
+    return _dict_manager.create_custom_wordlist(body.name, body.words)
+
+
+@router.delete("/dictionaries/custom/{name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_custom_dictionary(name: str) -> None:
+    """Elimina un diccionario personalizado."""
+    deleted = _dict_manager.delete_custom_wordlist(name)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Diccionario '{name}' no encontrado")
+
+
 @router.get("/rules", response_model=list[RuleInfo])
 def list_rules(
     force_rescan: bool = Query(False),
 ) -> list[RuleInfo]:
     """Lista los archivos de reglas disponibles en el sistema."""
     return _rules_manager.scan_all(force=force_rescan)
+
+
+@router.get("/dictionaries/system")
+def list_system_wordlists() -> list[str]:
+    from aegiswifi.cracking.dictionary import scan_system_wordlists
+    return scan_system_wordlists()
+
+
+class CustomWordlistReq(BaseModel):
+    name: str
+    words: list[str]
+
+
+@router.post("/dictionaries/custom")
+def create_custom_wordlist_route(req: CustomWordlistReq):
+    from aegiswifi.cracking.dictionary import create_custom_wordlist
+    path = create_custom_wordlist(req.name, req.words)
+    return {"path": path}
+
+
+@router.delete("/dictionaries/custom/{name}")
+def delete_custom_wordlist_route(name: str):
+    from aegiswifi.cracking.dictionary import delete_custom_wordlist
+    success = delete_custom_wordlist(name)
+    if not success:
+        raise HTTPException(status_code=404, detail="Wordlist not found")
+    return {"status": "deleted"}
+
+
+@router.get("/engines")
+def list_engines():
+    return ["hashcat", "john"]
+
 
 
 # ===================================================================

@@ -161,3 +161,43 @@ class DictionaryManager:
         if result.returncode != 0:
             raise RuntimeError("7z failed")
         return len(result.stdout.decode("utf-8", errors="replace").splitlines())
+
+def scan_system_wordlists() -> list[str]:
+    """Scans /usr/share/wordlists/ for .txt and .lst files."""
+    paths = []
+    base = Path("/usr/share/wordlists")
+    if base.is_dir():
+        for p in base.rglob("*"):
+            if p.is_file() and p.suffix.lower() in (".txt", ".lst"):
+                paths.append(str(p.resolve()))
+    return sorted(paths)
+
+def create_custom_wordlist(name: str, words_list: list[str]) -> str:
+    """Saves a custom wordlist to data/wordlists/{name}.txt"""
+    dir_path = Path("data/wordlists")
+    dir_path.mkdir(parents=True, exist_ok=True)
+    if not name.endswith(".txt"):
+        name += ".txt"
+    file_path = dir_path / name
+    file_path.write_text("\\n".join(words_list) + "\\n", encoding="utf-8")
+    return str(file_path.resolve())
+
+def delete_custom_wordlist(name: str) -> bool:
+    """Deletes custom wordlist."""
+    if not name.endswith(".txt"):
+        name += ".txt"
+    file_path = Path("data/wordlists") / name
+    if file_path.is_file():
+        file_path.unlink()
+        return True
+    return False
+
+def list_all_wordlists() -> list[str]:
+    """Combines system + custom wordlists."""
+    system = scan_system_wordlists()
+    custom = []
+    custom_dir = Path("data/wordlists")
+    if custom_dir.is_dir():
+        for p in custom_dir.rglob("*.txt"):
+            custom.append(str(p.resolve()))
+    return sorted(system + custom)

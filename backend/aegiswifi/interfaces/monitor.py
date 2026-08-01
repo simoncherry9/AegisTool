@@ -94,13 +94,6 @@ async def list_channels_for_band(phy: str, band_name: str) -> list[int]:
 # ── Monitor mode ───────────────────────────────────────────────────
 
 
-from aegiswifi.core.privileged import run_privileged_cmd
-
-
-async def _run_airmon(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``airmon-ng`` con privilegios elevados."""
-    stdout, stderr, _ = await run_privileged_cmd(["airmon-ng"] + args, timeout=timeout)
-    return stdout, stderr
 
 
 async def enable_monitor_mode(interface: str) -> str:
@@ -157,7 +150,10 @@ async def enable_monitor_mode(interface: str) -> str:
 
     await _run_ip(["link", "set", interface, "up"])
 
-    if not stderr or "command failed" not in stderr.lower():
+    # Verificar que iw realmente funcionó (no asumir éxito si el binario no existe)
+    if stderr and ("command not found" in stderr.lower() or "not found" in stderr.lower()):
+        log.warning("iw binary not available for fallback", stderr=stderr.strip())
+    elif not stderr or "command failed" not in stderr.lower():
         log.info("monitor mode enabled via iw", interface=interface)
         return interface
 

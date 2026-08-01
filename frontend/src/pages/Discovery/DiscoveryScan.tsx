@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
 import { discoveryApi, type AccessPoint, type ClientSummary, type ScanStatus, type ScanConfig } from '../../api/discovery'
 import { interfacesApi, type WirelessInterface } from '../../api/interfaces'
@@ -14,6 +15,7 @@ export function DiscoveryScan() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'aps' | 'clients'>('aps')
+  const navigate = useNavigate()
 
   // Scan config state
   const [selectedIface, setSelectedIface] = useState('')
@@ -342,7 +344,7 @@ export function DiscoveryScan() {
                     const signalColor = signal > -65 ? 'var(--green)' : signal > -80 ? 'var(--yellow)' : 'var(--red)'
                     
                     return (
-                      <tr key={`${ap.bssid}-${i}`}>
+                      <tr key={`${ap.bssid}-${i}`} className="clickable" onClick={() => navigate(`/discovery/ap/${ap.bssid}`)}>
                         <td style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           <span style={{ color: ap.ssid ? 'var(--text-primary)' : 'var(--text-muted)', fontStyle: ap.ssid ? 'normal' : 'italic' }}>
                             {ap.ssid || '<SSID Oculto>'}
@@ -419,7 +421,7 @@ export function DiscoveryScan() {
                 </thead>
                 <tbody>
                   {clients.map((c, i) => (
-                    <tr key={`${c.mac}-${i}`}>
+                    <tr key={`${c.mac}-${i}`} className="clickable" onClick={() => navigate(`/discovery/client/${encodeURIComponent(c.mac)}`)}>
                       <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.mac}</td>
                       <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.vendor || '—'}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.associated_bssid || '—'}</td>

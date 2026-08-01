@@ -114,6 +114,30 @@ async def run_aireplay_privileged(args: list[str], timeout: int = 15) -> tuple[s
     return stdout, stderr
 
 
+async def run_wash_privileged(args: list[str], timeout: int = 30) -> tuple[str, str]:
+    """Ejecuta ``wash`` con privilegios elevados para detección WPS."""
+    stdout, stderr, _ = await run_privileged_cmd(["wash"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_reaver_privileged(args: list[str], timeout: int = 300) -> tuple[str, str]:
+    """Ejecuta ``reaver`` con privilegios elevados para ataque WPS."""
+    stdout, stderr, _ = await run_privileged_cmd(["reaver"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_bully_privileged(args: list[str], timeout: int = 300) -> tuple[str, str]:
+    """Ejecuta ``bully`` con privilegios elevados para ataque WPS."""
+    stdout, stderr, _ = await run_privileged_cmd(["bully"] + args, timeout=timeout)
+    return stdout, stderr
+
+
+async def run_hcxdumptool_privileged(args: list[str], timeout: int = 120) -> tuple[str, str]:
+    """Ejecuta ``hcxdumptool`` con privilegios elevados para captura PMKID."""
+    stdout, stderr, _ = await run_privileged_cmd(["hcxdumptool"] + args, timeout=timeout)
+    return stdout, stderr
+
+
 async def spawn_privileged_process(
     cmd: list[str],
 ) -> asyncio.subprocess.Process | None:
@@ -139,3 +163,4 @@ async def spawn_privileged_process(
     except OSError as exc:
         log.error("failed to spawn privileged process", binary=cmd[0], error=str(exc))
         return None
+
