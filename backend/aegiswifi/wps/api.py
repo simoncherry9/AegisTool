@@ -8,6 +8,7 @@ from aegiswifi.wps import service as wps_service
 from aegiswifi.wps.schemas import (
     WpsAttackRequest,
     WpsAttackStatusRead,
+    WpsScanRequest,
     WpsScanResult,
 )
 
@@ -15,8 +16,8 @@ router = APIRouter(prefix="/wps", tags=["wps"])
 
 
 @router.post("/scan", response_model=list[WpsScanResult])
-async def scan_wps_aps(interface: str = Query(..., description="Interfaz en modo monitor")) -> list[WpsScanResult]:
-    return await wps_service.scan_wps(interface)
+async def scan_wps_aps(req: WpsScanRequest) -> list[WpsScanResult]:
+    return await wps_service.scan_wps(req.interface)
 
 
 @router.post("/attack", response_model=WpsAttackStatusRead, status_code=status.HTTP_201_CREATED)

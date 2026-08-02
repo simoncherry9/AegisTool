@@ -9,6 +9,7 @@ export function WPSPage() {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeAttacks, setActiveAttacks] = useState<any[]>([])
+  const [currentInterface, setCurrentInterface] = useState<string | null>(null)
 
   const loadData = async () => {
     try {
@@ -16,6 +17,16 @@ export function WPSPage() {
       setWpsAps(aps as AccessPoint[])
       const attacks = (await wpsApi.attacks().catch(() => [])) as any[]
       setActiveAttacks(attacks)
+
+      const status = await discoveryApi.status().catch(() => null)
+      if (status?.interface) {
+        setCurrentInterface(status.interface)
+      } else {
+        const { api } = await import('../../api/client')
+        const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
+        const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
+        if (mon) setCurrentInterface(mon.name)
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -32,10 +43,14 @@ export function WPSPage() {
   }, [])
 
   const handleScan = async () => {
+    if (!currentInterface) {
+      setError('No hay interfaz disponible')
+      return
+    }
     setScanning(true)
     setError(null)
     try {
-      await wpsApi.scan()
+      await wpsApi.scan({ interface: currentInterface })
       await new Promise(r => setTimeout(r, 2000))
       await loadData()
     } catch (err: any) {
@@ -46,8 +61,12 @@ export function WPSPage() {
   }
 
   const handleAttack = async (bssid: string, type: string) => {
+    if (!currentInterface) {
+      setError('No hay interfaz disponible')
+      return
+    }
     try {
-      await wpsApi.attack({ bssid, type })
+      await wpsApi.attack({ interface: currentInterface, bssid, method: type })
       loadData()
     } catch (err: any) {
       setError(err.message)

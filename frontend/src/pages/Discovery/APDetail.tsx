@@ -27,6 +27,11 @@ export function APDetail() {
   const [deauthClient, setDeauthClient] = useState('')
   const [actionStatus, setActionStatus] = useState<string | null>(null)
 
+  // Tracking captures
+  const [activeHandshakeId, setActiveHandshakeId] = useState<string | null>(null)
+  const [hsStatus, setHsStatus] = useState<any>(null)
+
+  // Initial load
   useEffect(() => {
     async function loadData() {
       if (!bssid) return
@@ -41,17 +46,16 @@ export function APDetail() {
         if (status?.interface) {
           setCurrentInterface(status.interface)
         } else {
-          // Si no hay escaneo activo, traer la primera interfaz en modo monitor disponible
+          const { api } = await import('../../api/client')
           const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
-          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
+          const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
           if (mon) setCurrentInterface(mon.name)
         }
 
-        // Scope check
+        const { api } = await import('../../api/client')
         const engagements = (await api.get<any[]>('/engagements').catch(() => []))
-        const activeEngagement = engagements.find(e => e.status === 'active')
+        const activeEngagement = engagements.find((e: any) => e.status === 'active')
         if (activeEngagement && activeEngagement.scope) {
-          // simplified scope check
           setInScope(apData.in_scope)
         }
       } catch (err: any) {
@@ -63,20 +67,55 @@ export function APDetail() {
     loadData()
   }, [bssid])
 
+  // Polling AP and Clients
+  useEffect(() => {
+    if (!bssid) return
+    const interval = setInterval(async () => {
+      try {
+        const apData = await discoveryApi.accessPoint(bssid)
+        setAp(apData)
+        const allClients = await discoveryApi.clients()
+        setClients(allClients.filter(c => c.associated_bssid?.toLowerCase() === bssid.toLowerCase()))
+      } catch (err) {
+        // ignore
+      }
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [bssid])
+
+  // Polling Handshake Capture
+  useEffect(() => {
+    if (!activeHandshakeId) return
+    const interval = setInterval(async () => {
+      try {
+        const status = (await handshakeApi.getCapture(activeHandshakeId)) as any
+        setHsStatus(status)
+        if (status.status === 'complete' || status.status === 'failed' || status.status === 'stopped') {
+          setActiveHandshakeId(null)
+        }
+      } catch (err) {
+        // ignore
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [activeHandshakeId])
+
   const handleCaptureHandshake = async () => {
     if (!ap) return
     if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
     try {
       setActionStatus('Iniciando captura de Handshake...')
-      await handshakeApi.startCapture({
+      const res = await handshakeApi.startCapture({
         interface: currentInterface,
         bssid: ap.bssid,
         channel: ap.channel,
         duration: hsDuration,
         deauth_assisted: hsDeauth,
         deauth_count: 3
-      })
-      setActionStatus('Captura de Handshake iniciada exitosamente.')
+      }) as any
+      setActiveHandshakeId(res.id)
+      setHsStatus(res)
+      setActionStatus(null) // Usamos el ui del handshake ahora
     } catch (err: any) {
       setActionStatus(`Error: ${err.message}`)
     }
@@ -240,9 +279,45 @@ export function APDetail() {
             <input type="checkbox" id="hsDeauth" checked={hsDeauth} onChange={(e) => setHsDeauth(e.target.checked)} />
             <label htmlFor="hsDeauth" style={{ fontSize: 13, cursor: 'pointer' }}>Deauth asisitido</label>
           </div>
-          <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleCaptureHandshake}>
-            Iniciar Captura EAPOL
+          <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleCaptureHandshake} disabled={activeHandshakeId !== null}>
+            {activeHandshakeId ? 'Capturando...' : 'Iniciar Captura EAPOL'}
           </button>
+          
+          {hsStatus && (
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, fontSize: 13, border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, color: 'var(--text)' }}>Estado:</span>
+                <span className={`badge ${hsStatus.status === 'complete' ? 'badge-active' : hsStatus.status === 'failed' ? 'badge-draft' : 'badge-info'}`}>
+                  {hsStatus.status.toUpperCase()}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Tiempo:</span>
+                <span>{hsStatus.elapsed_seconds}s / {hsDuration}s</span>
+              </div>
+              
+              {/* Progress bar */}
+              <div style={{ height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
+                <div style={{ 
+                  height: '100%', 
+                  width: `${Math.min(100, (hsStatus.elapsed_seconds / hsDuration) * 100)}%`, 
+                  background: 'var(--accent)',
+                  transition: 'width 1s linear'
+                }} />
+              </div>
+
+              {hsStatus.handshake_detected && (
+                <div style={{ color: 'var(--green)', fontWeight: 700, textAlign: 'center', marginTop: 8, animation: 'pulse 2s infinite' }}>
+                  ✓ ¡Handshake Capturado!
+                </div>
+              )}
+              {hsStatus.error && (
+                <div style={{ color: 'var(--red)', marginTop: 8, fontSize: 12 }}>
+                  {hsStatus.error}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Capturar PMKID */}

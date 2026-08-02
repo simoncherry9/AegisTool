@@ -22,6 +22,10 @@ class WpsAttackStatusEnum(str, enum.Enum):
     STOPPED = "stopped"
 
 
+class WpsScanRequest(BaseModel):
+    interface: str = Field(..., description="Interfaz en modo monitor")
+
+
 class WpsScanResult(BaseModel):
     bssid: str
     ssid: str | None = None

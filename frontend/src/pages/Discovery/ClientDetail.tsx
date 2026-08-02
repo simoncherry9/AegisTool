@@ -30,10 +30,9 @@ export function ClientDetail() {
         if (status?.interface) {
           setCurrentInterface(status.interface)
         } else {
-          // Si no hay escaneo activo, traer la primera interfaz en modo monitor disponible
           const { api } = await import('../../api/client')
           const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
-          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
+          const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
           if (mon) setCurrentInterface(mon.name)
         }
       } catch (err: any) {
@@ -43,6 +42,18 @@ export function ClientDetail() {
       }
     }
     loadData()
+
+    if (!mac) return
+    const interval = setInterval(async () => {
+      try {
+        const allClients = await discoveryApi.clients()
+        const found = allClients.find(c => c.mac.toLowerCase() === decodeURIComponent(mac).toLowerCase())
+        if (found) setClient(found)
+      } catch (err) {
+        // ignore
+      }
+    }, 2000)
+    return () => clearInterval(interval)
   }, [mac])
 
   const handleDeauth = async () => {
