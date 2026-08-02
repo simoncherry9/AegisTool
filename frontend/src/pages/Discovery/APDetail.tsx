@@ -307,9 +307,20 @@ export function APDetail() {
               </div>
 
               {hsStatus.status === 'complete' && !hsStatus.error && hsStatus.hash_path && (
-                <div style={{ color: 'var(--green)', fontWeight: 700, textAlign: 'center', marginTop: 8, animation: 'pulse 2s infinite' }}>
-                  ✓ ¡Handshake Verificado y Capturado!
-                </div>
+                <>
+                  <div style={{ color: 'var(--green)', fontWeight: 700, textAlign: 'center', marginTop: 8, animation: 'pulse 2s infinite' }}>
+                    ✓ ¡Handshake Verificado y Capturado!
+                  </div>
+                  {hsStatus.artifact_id && (
+                    <button 
+                      className="btn btn-primary" 
+                      style={{ width: '100%', marginTop: 12, background: 'var(--blue)' }} 
+                      onClick={() => navigate(`/cracking/analyze/${hsStatus.artifact_id}`)}
+                    >
+                      Ir a Cracking (Crackear Hash) →
+                    </button>
+                  )}
+                </>
               )}
               {hsStatus.error && (
                 <div style={{ color: 'var(--red)', marginTop: 8, fontSize: 12 }}>

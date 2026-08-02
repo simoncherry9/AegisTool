@@ -46,6 +46,7 @@ class HandshakeCaptureStatusRead(BaseModel):
     handshake_detected: bool = False
     pcap_path: str | None = None
     hash_path: str | None = None
+    artifact_id: int | None = None
     error: str | None = None
 
 

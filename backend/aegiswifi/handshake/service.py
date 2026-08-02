@@ -182,14 +182,33 @@ async def _monitor_capture(capture_id: str) -> None:
                 from aegiswifi.database.engine import SessionLocal
                 from aegiswifi.validation.service import get_validation_service
                 from aegiswifi.database.models import Capture as DBCapture
+                from aegiswifi.database.models import Engagement, AccessPoint, EngagementStatus
                 with SessionLocal() as db_session:
-                    # Crear registro de Capture en DB si no existe (simplificado)
-                    db_cap = DBCapture(path=str(cap_path), interface=entry["interface"], status="COMPLETED")
+                    # Encontrar engagement activo (requerido para DB)
+                    active_eng = db_session.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
+                    # Si no hay activo, intentar obtener cualquiera para pruebas, o crear uno mínimo si falla todo
+                    eng_id = active_eng.id if active_eng else 1
+                    
+                    # Encontrar el AP asociado
+                    ap = db_session.query(AccessPoint).filter_by(bssid=entry["bssid"]).first()
+                    ap_id = ap.id if ap else None
+
+                    # Crear registro de Capture en DB
+                    db_cap = DBCapture(
+                        engagement_id=eng_id,
+                        access_point_id=ap_id,
+                        path=str(cap_path), 
+                        category="handshake",
+                        format="cap"
+                    )
                     db_session.add(db_cap)
                     db_session.commit()
+                    db_session.refresh(db_cap)
                     
                     val_service = get_validation_service()
-                    await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
+                    result = await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
+                    if result.artifact_id:
+                        entry["artifact_id"] = result.artifact_id
             except Exception as e:
                 log.error("Error al validar automáticamente el handshake", error=str(e))
         elif entry["status"] == CaptureStatus.CAPTURING:
