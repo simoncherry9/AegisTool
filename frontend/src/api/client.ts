@@ -27,7 +27,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = body || res.statusText
     try {
       const parsed = JSON.parse(body)
-      if (parsed.detail) message = parsed.detail
+      if (parsed.detail) {
+        if (Array.isArray(parsed.detail)) {
+          message = parsed.detail.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join(', ')
+        } else if (typeof parsed.detail === 'string') {
+          message = parsed.detail
+        } else {
+          message = JSON.stringify(parsed.detail)
+        }
+      }
     } catch { /* body is not JSON, use as-is */ }
     throw new ApiError(res.status, message)
   }

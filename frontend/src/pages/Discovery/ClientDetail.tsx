@@ -12,6 +12,7 @@ export function ClientDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionStatus, setActionStatus] = useState<string | null>(null)
+  const [currentInterface, setCurrentInterface] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadData() {
@@ -23,6 +24,17 @@ export function ClientDetail() {
           setClient(found)
         } else {
           setError('Cliente no encontrado')
+        }
+        
+        const status = await discoveryApi.status().catch(() => null)
+        if (status?.interface) {
+          setCurrentInterface(status.interface)
+        } else {
+          // Si no hay escaneo activo, traer la primera interfaz en modo monitor disponible
+          const { api } = await import('../../api/client')
+          const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
+          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
+          if (mon) setCurrentInterface(mon.name)
         }
       } catch (err: any) {
         setError(err.message || 'Error loading Client')
@@ -38,9 +50,14 @@ export function ClientDetail() {
       setActionStatus('Error: El cliente no está asociado a ningún AP conocido.')
       return
     }
+    if (!currentInterface) {
+      setActionStatus('Error: No hay interfaz disponible.')
+      return
+    }
     try {
       setActionStatus('Enviando deauth dirigida...')
       await deauthApi.send({
+        interface: currentInterface,
         bssid: client.associated_bssid,
         client_mac: client.mac,
         count: 10

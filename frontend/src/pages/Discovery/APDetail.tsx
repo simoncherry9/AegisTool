@@ -17,6 +17,7 @@ export function APDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inScope, setInScope] = useState<boolean>(false)
+  const [currentInterface, setCurrentInterface] = useState<string | null>(null)
 
   // Forms state
   const [hsDuration, setHsDuration] = useState(60)
@@ -36,8 +37,18 @@ export function APDetail() {
         const allClients = await discoveryApi.clients()
         setClients(allClients.filter(c => c.associated_bssid?.toLowerCase() === bssid.toLowerCase()))
         
+        const status = await discoveryApi.status().catch(() => null)
+        if (status?.interface) {
+          setCurrentInterface(status.interface)
+        } else {
+          // Si no hay escaneo activo, traer la primera interfaz en modo monitor disponible
+          const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
+          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
+          if (mon) setCurrentInterface(mon.name)
+        }
+
         // Scope check
-        const engagements = (await api.get('/engagements').catch(() => [])) as any[]
+        const engagements = (await api.get<any[]>('/engagements').catch(() => []))
         const activeEngagement = engagements.find(e => e.status === 'active')
         if (activeEngagement && activeEngagement.scope) {
           // simplified scope check
@@ -54,13 +65,16 @@ export function APDetail() {
 
   const handleCaptureHandshake = async () => {
     if (!ap) return
+    if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
     try {
       setActionStatus('Iniciando captura de Handshake...')
       await handshakeApi.startCapture({
+        interface: currentInterface,
         bssid: ap.bssid,
         channel: ap.channel,
         duration: hsDuration,
-        deauth: hsDeauth
+        deauth_assisted: hsDeauth,
+        deauth_count: 3
       })
       setActionStatus('Captura de Handshake iniciada exitosamente.')
     } catch (err: any) {
@@ -70,9 +84,11 @@ export function APDetail() {
 
   const handleCapturePMKID = async () => {
     if (!ap) return
+    if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
     try {
       setActionStatus('Iniciando captura de PMKID...')
       await pmkidApi.startCapture({
+        interface: currentInterface,
         bssid: ap.bssid,
         channel: ap.channel,
         duration: pmkDuration
@@ -85,9 +101,11 @@ export function APDetail() {
 
   const handleDeauth = async () => {
     if (!ap) return
+    if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
     try {
       setActionStatus('Enviando deauth...')
       await deauthApi.send({
+        interface: currentInterface,
         bssid: ap.bssid,
         client_mac: deauthClient || undefined,
         count: deauthCount,
@@ -101,9 +119,11 @@ export function APDetail() {
 
   const handleWpsAttack = async (type: string) => {
     if (!ap) return
+    if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
     try {
       setActionStatus(`Iniciando ataque WPS (${type})...`)
       await wpsApi.attack({
+        interface: currentInterface,
         bssid: ap.bssid,
         channel: ap.channel,
         type: type

@@ -14,6 +14,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
+from aegiswifi.discovery import oui
 from aegiswifi.discovery.classifier import classify_security, detect_degraded_security
 from aegiswifi.discovery.schemas import (
     AccessPointDetail,
@@ -86,6 +87,7 @@ class DiscoveryInventory:
             if existing is None:
                 # Nuevo AP
                 detail = self._build_ap_detail(data, classification, now)
+                detail.vendor = await oui.get_vendor(bssid)
                 self._aps[bssid] = detail
                 self._protocol_history[bssid] = detail.protocol
                 events.append(
@@ -98,6 +100,7 @@ class DiscoveryInventory:
                 # Actualizar campos
                 detail = self._build_ap_detail(data, classification, now)
                 detail.first_seen = existing.first_seen
+                detail.vendor = existing.vendor or await oui.get_vendor(bssid)
                 self._aps[bssid] = detail
                 events.append(
                     DiscoveryEvent(
@@ -151,6 +154,7 @@ class DiscoveryInventory:
                     probe_requests=probes,
                     first_seen=now,
                     last_seen=now,
+                    vendor=await oui.get_vendor(mac)
                 )
                 self._clients[mac] = summary
                 events.append(
@@ -166,6 +170,7 @@ class DiscoveryInventory:
                         "last_seen": now,
                         "associated_bssid": data.get("bssid", "").upper() or existing.associated_bssid,
                         "probe_requests": probes or existing.probe_requests,
+                        "vendor": existing.vendor or await oui.get_vendor(mac)
                     }
                 )
                 self._clients[mac] = summary
@@ -186,6 +191,7 @@ class DiscoveryInventory:
         """Lista APs aplicando filtros opcionales."""
         async with self._lock:
             aps = list(self._aps.values())
+            self._populate_clients_count(aps)
 
         if filters is None:
             return aps
@@ -202,13 +208,18 @@ class DiscoveryInventory:
     async def get_ap(self, bssid: str) -> AccessPointDetail | None:
         """Obtiene un AP por BSSID."""
         async with self._lock:
-            return self._aps.get(bssid.upper())
+            ap = self._aps.get(bssid.upper())
+            if ap:
+                self._populate_clients_count([ap])
+            return ap
 
     async def snapshot(self, scan_status: ScanStatus | None = None) -> InventorySnapshot:
         """Toma un snapshot del inventario actual."""
         async with self._lock:
+            aps = list(self._aps.values())
+            self._populate_clients_count(aps)
             return InventorySnapshot(
-                access_points=list(self._aps.values()),
+                access_points=aps,
                 clients=list(self._clients.values()),
                 scan_status=scan_status or ScanStatus(),
             )
@@ -228,12 +239,16 @@ class DiscoveryInventory:
     async def find_degraded(self) -> list[AccessPointDetail]:
         """Encuentra APs con degradación de seguridad."""
         async with self._lock:
-            return [ap for ap in self._aps.values() if ap.degraded]
+            aps = [ap for ap in self._aps.values() if ap.degraded]
+            self._populate_clients_count(aps)
+            return aps
 
     async def find_aps_with_wps(self) -> list[AccessPointDetail]:
         """Encuentra APs con WPS habilitado."""
         async with self._lock:
-            return [ap for ap in self._aps.values() if ap.wps]
+            aps = [ap for ap in self._aps.values() if ap.wps]
+            self._populate_clients_count(aps)
+            return aps
 
     async def clear(self) -> None:
         """Limpia todo el inventario."""
@@ -251,6 +266,18 @@ class DiscoveryInventory:
             return self._event_history[-limit:]
 
     # ── Helpers ─────────────────────────────────────────────────────
+
+    def _populate_clients_count(self, aps: list[AccessPointDetail]) -> None:
+        """Actualiza clients_count en los APs usando los clientes actuales.
+        Debe ser llamada dentro de self._lock.
+        """
+        counts: dict[str, int] = {}
+        for client in self._clients.values():
+            if client.associated_bssid:
+                counts[client.associated_bssid] = counts.get(client.associated_bssid, 0) + 1
+        
+        for ap in aps:
+            ap.clients_count = counts.get(ap.bssid, 0)
 
     @staticmethod
     def _build_ap_detail(
