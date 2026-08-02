@@ -173,27 +173,29 @@ async def _monitor_capture(capture_id: str) -> None:
                 proc.kill()
                 await proc.wait()
 
-        # Post-procesamiento
-        if entry["handshake_detected"] and entry.get("hash_path"):
-            entry["status"] = CaptureStatus.COMPLETE
+        # Guardar pcap_path si existe
+        if cap_path.exists() and cap_path.stat().st_size > 0:
+            entry["pcap_path"] = str(cap_path)
             
-            # Integrar con ValidationService para que aparezca en el apartado de handshakes
+            if entry["handshake_detected"] and entry.get("hash_path"):
+                entry["status"] = CaptureStatus.COMPLETE
+            elif entry["status"] == CaptureStatus.CAPTURING:
+                entry["status"] = CaptureStatus.FAILED
+                entry["error"] = "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
+                
+            # Integrar SIEMPRE con ValidationService para que aparezca en el apartado de handshakes (incluso si es inválido)
             try:
                 from aegiswifi.database.engine import SessionLocal
                 from aegiswifi.validation.service import get_validation_service
                 from aegiswifi.database.models import Capture as DBCapture
                 from aegiswifi.database.models import Engagement, AccessPoint, EngagementStatus
                 with SessionLocal() as db_session:
-                    # Encontrar engagement activo (requerido para DB)
                     active_eng = db_session.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
-                    # Si no hay activo, intentar obtener cualquiera para pruebas, o crear uno mínimo si falla todo
                     eng_id = active_eng.id if active_eng else 1
                     
-                    # Encontrar el AP asociado
                     ap = db_session.query(AccessPoint).filter_by(bssid=entry["bssid"]).first()
                     ap_id = ap.id if ap else None
 
-                    # Crear registro de Capture en DB
                     db_cap = DBCapture(
                         engagement_id=eng_id,
                         access_point_id=ap_id,
@@ -210,14 +212,11 @@ async def _monitor_capture(capture_id: str) -> None:
                     if result.artifact_id:
                         entry["artifact_id"] = result.artifact_id
             except Exception as e:
-                log.error("Error al validar automáticamente el handshake", error=str(e))
-        elif entry["status"] == CaptureStatus.CAPTURING:
-            entry["status"] = CaptureStatus.FAILED
-            entry["error"] = "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
-
-        # Guardar pcap_path si existe
-        if cap_path.exists():
-            entry["pcap_path"] = str(cap_path)
+                log.error("Error al persistir/validar captura en DB", error=str(e))
+        else:
+            if entry["status"] == CaptureStatus.CAPTURING:
+                entry["status"] = CaptureStatus.FAILED
+                entry["error"] = "No se generó ningún archivo de captura."
 
     except Exception as exc:
         log.error("capture monitoring error", capture_id=capture_id, error=str(exc))
