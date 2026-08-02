@@ -18,18 +18,17 @@ export interface WirelessInterface {
 }
 
 export interface InterfacePrepareResult {
-  name: string
-  success: boolean
-  mode: string | null
-  injection_test: boolean | null
-  error: string | null
+  interface: string
+  monitor_interface: string
+  mode_set: boolean
+  injection_ok: boolean | null
+  original_state: unknown
 }
 
 export interface InterfaceRestoreResult {
-  name: string
-  success: boolean
-  restored_state: string | null
-  error: string | null
+  interface: string
+  restored: boolean
+  current_type: string
 }
 
 export interface InterfaceDiagnostic {

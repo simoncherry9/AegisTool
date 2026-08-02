@@ -60,15 +60,57 @@ from aegiswifi.core.privileged import run_privileged_cmd
 
 
 async def _run_iw(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``iw`` con los argumentos dados a través del runner privilegiado."""
-    stdout, stderr, _ = await run_privileged_cmd(["iw"] + args, timeout=timeout)
-    return stdout, stderr
+    """Ejecuta ``iw`` con los argumentos dados.
+
+    ``iw dev`` / ``iw phy`` son comandos de solo lectura que **no requieren
+    sudo**.  Ejecutarlos con ``run_privileged_cmd`` fallaba silenciosamente
+    cuando la contraseña sudo no estaba configurada, devolviendo cadena vacía
+    y provocando "no hay interfaces disponibles".
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "iw", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return "", "timeout"
+        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    except FileNotFoundError:
+        return "", "iw: command not found"
+    except OSError as exc:
+        log.warning("iw execution error", error=str(exc))
+        return "", str(exc)
 
 
 async def _run_ethtool(args: list[str], timeout: int = 10) -> tuple[str, str]:  # noqa: ASYNC109
-    """Ejecuta ``ethtool`` con los argumentos dados a través del runner privilegiado."""
-    stdout, stderr, _ = await run_privileged_cmd(["ethtool"] + args, timeout=timeout)
-    return stdout, stderr
+    """Ejecuta ``ethtool`` con los argumentos dados.
+
+    ``ethtool -i`` es un comando de solo lectura que **no requiere sudo**.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ethtool", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return "", "timeout"
+        return stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    except FileNotFoundError:
+        return "", "ethtool: command not found"
+    except OSError as exc:
+        log.warning("ethtool execution error", error=str(exc))
+        return "", str(exc)
+
 
 
 async def _run_airmon(args: list[str], timeout: int = 15) -> tuple[str, str]:  # noqa: ASYNC109

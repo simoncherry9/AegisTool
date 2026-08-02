@@ -435,10 +435,19 @@ class TestMonitorModule:
         """enable_monitor_mode: cambio directo exitoso."""
         from aegiswifi.interfaces.monitor import enable_monitor_mode
 
+        # iw dev output: first call → managed (initial check), second call → monitor (post-set verification)
+        iw_dev_managed = "phy#0\n\tInterface wlan0\n\t\tifindex 3\n\t\ttype managed\n"
+        iw_dev_monitor = "phy#0\n\tInterface wlan0\n\t\tifindex 3\n\t\ttype monitor\n"
+
+        mock_iw = AsyncMock(side_effect=[
+            (iw_dev_managed, ""),  # initial check: not in monitor
+            (iw_dev_monitor, ""),  # post-set verification: now in monitor
+        ])
+
         with (
             patch("aegiswifi.interfaces.monitor._run_airmon", new_callable=AsyncMock, return_value=("", "")),
             patch("aegiswifi.interfaces.monitor._run_ip", new_callable=AsyncMock, return_value=("", "")),
-            patch("aegiswifi.interfaces.monitor._run_iw", new_callable=AsyncMock, return_value=("", "")),
+            patch("aegiswifi.interfaces.monitor._run_iw", mock_iw),
             patch("aegiswifi.interfaces.monitor._run_iw_mutating", new_callable=AsyncMock, return_value=("", "")),
         ):
             result = await enable_monitor_mode("wlan0")

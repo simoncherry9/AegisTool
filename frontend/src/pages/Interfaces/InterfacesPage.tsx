@@ -35,11 +35,12 @@ export function InterfacesPage() {
     setActionError(null)
     try {
       const result = await interfacesApi.prepare(name)
-      if (result.success) {
-        setActionMsg('Interfaz ' + name + ' preparada: ' + result.mode)
-        setIfaces(ifaces.map(i => i.name === name ? { ...i, monitor_mode: true, mode: result.mode || i.mode } : i))
+      if (result.mode_set) {
+        setActionMsg(`Interfaz preparada → ${result.monitor_interface} (monitor mode)`)
+        const ifcs = await interfacesApi.list()
+        setIfaces(ifcs)
       } else {
-        setActionError('Error al preparar ' + name + ': ' + (result.error || 'desconocido'))
+        setActionError('No se pudo activar monitor mode en ' + name)
       }
     } catch (e: any) {
       setActionError('Error: ' + e.message)
@@ -53,7 +54,7 @@ export function InterfacesPage() {
     setActionError(null)
     try {
       const result = await interfacesApi.restore(name)
-      setActionMsg('Interfaz ' + name + ' restaurada' + (result.restored_state ? ' (' + result.restored_state + ')' : ''))
+      setActionMsg(`Interfaz ${name} restaurada (${result.current_type})`)
       const ifcs = await interfacesApi.list()
       setIfaces(ifcs)
     } catch (e: any) {

@@ -107,13 +107,21 @@ export function DiscoveryScan() {
     setError(null)
     try {
       const result = await interfacesApi.prepare(selectedIface)
-      if (result.success) {
-        setPrepareMsg(`Interfaz ${selectedIface} preparada (${result.mode})`)
+      if (result.mode_set) {
+        setPrepareMsg(`Interfaz preparada → ${result.monitor_interface} (monitor mode)`)
+        // Actualizar la interfaz seleccionada si cambió de nombre
+        if (result.monitor_interface !== selectedIface) {
+          setSelectedIface(result.monitor_interface)
+        }
+        // Recargar interfaces
+        const ifaces = await interfacesApi.list().catch(() => [])
+        setInterfaces(ifaces)
       } else {
-        setError(`Error al preparar: ${result.error || 'desconocido'}`)
+        setError('No se pudo activar monitor mode')
       }
     } catch (e: any) {
-      setError(e.message || 'Error al preparar interfaz')
+      const detail = e?.response?.data?.detail || e.message || 'Error al preparar interfaz'
+      setError(detail)
     } finally {
       setPhase('idle')
     }

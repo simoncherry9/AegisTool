@@ -106,41 +106,55 @@ async def enable_monitor_mode(interface: str) -> str:
        ``iw set type monitor`` e ``ip link up``.
     3. Si falla, crea interfaz virtual ``<iface>mon``.
     """
+    from aegiswifi.interfaces.detection import _parse_iw_dev_output
+
     # 0. Verificar si ya se encuentra en modo monitor
     iw_dev_init, _ = await _run_iw(["dev"])
-    if f"Interface {interface}" in iw_dev_init and "type monitor" in iw_dev_init:
-        log.info("interface is already in monitor mode", interface=interface)
-        return interface
+    parsed_ifaces = _parse_iw_dev_output(iw_dev_init)
+
+    for entry in parsed_ifaces:
+        if entry["iface"] == interface and entry.get("type") == "monitor":
+            log.info("interface is already in monitor mode", interface=interface)
+            return interface
 
     mon_candidate = f"{interface}mon"
-    if f"Interface {mon_candidate}" in iw_dev_init and "type monitor" in iw_dev_init:
-        log.info("virtual/renamed monitor interface already active", interface=mon_candidate)
-        return mon_candidate
+    for entry in parsed_ifaces:
+        if entry["iface"] == mon_candidate and entry.get("type") == "monitor":
+            log.info("virtual/renamed monitor interface already active", interface=mon_candidate)
+            return mon_candidate
 
     # 1. Estrategia principal con airmon-ng (estándar en Kali Linux)
     await _run_airmon(["check", "kill"])
     airout, airerr = await _run_airmon(["start", interface])
+    combined_air = airout + airerr
 
-    if "password is required" in (airout + airerr).lower() or "a password is required" in (airout + airerr).lower():
+    if "password is required" in combined_air.lower() or "a password is required" in combined_air.lower():
         raise RuntimeError(
             f"Se requieren privilegios sudo para preparar {interface}. "
             "Por favor ingresa la contraseña sudo de Kali en la sección 'Herramientas del Sistema'."
         )
 
-    if airout and ("monitor mode" in airout.lower() or "enabled" in airout.lower()):
-        import re
+    if "command not found" not in combined_air.lower() and airout:
+        if "monitor mode" in airout.lower() or "enabled" in airout.lower():
+            import re
 
-        m = re.search(r"monitor mode (?:enabled|started) (?:on|for)\s+([a-zA-Z0-9_\-]+)", airout, re.IGNORECASE)
-        if m:
-            mon_iface = m.group(1).rstrip(")")
-            log.info("airmon-ng monitor mode enabled", interface=mon_iface)
-            return mon_iface
+            m = re.search(r"monitor mode (?:enabled|started) (?:on|for)\s+([a-zA-Z0-9_\-]+)", airout, re.IGNORECASE)
+            if m:
+                mon_iface = m.group(1).rstrip(")")
+                log.info("airmon-ng monitor mode enabled", interface=mon_iface)
+                return mon_iface
 
-        # Si airmon-ng creó <iface>mon o usó la misma
+        # Verificar qué pasó después de airmon-ng
         iw_out, _ = await _run_iw(["dev"])
-        if mon_candidate in iw_out:
-            return mon_candidate
-        return interface
+        post_ifaces = _parse_iw_dev_output(iw_out)
+
+        for entry in post_ifaces:
+            if entry["iface"] == mon_candidate and entry.get("type") == "monitor":
+                log.info("airmon-ng created monitor interface", interface=mon_candidate)
+                return mon_candidate
+            if entry["iface"] == interface and entry.get("type") == "monitor":
+                log.info("airmon-ng set interface to monitor mode", interface=interface)
+                return interface
 
     # 2. Estrategia directa ip link down + iw set monitor + ip link up
     await _run_ip(["link", "set", interface, "down"])
@@ -154,8 +168,15 @@ async def enable_monitor_mode(interface: str) -> str:
     if stderr and ("command not found" in stderr.lower() or "not found" in stderr.lower()):
         log.warning("iw binary not available for fallback", stderr=stderr.strip())
     elif not stderr or "command failed" not in stderr.lower():
-        log.info("monitor mode enabled via iw", interface=interface)
-        return interface
+        # Confirmar el cambio vía iw dev
+        iw_check, _ = await _run_iw(["dev"])
+        check_ifaces = _parse_iw_dev_output(iw_check)
+        for entry in check_ifaces:
+            if entry["iface"] == interface and entry.get("type") == "monitor":
+                log.info("monitor mode enabled via iw", interface=interface)
+                return interface
+        # iw no confirmó monitor mode, seguir al siguiente fallback
+        log.warning("iw set type monitor did not result in monitor mode", interface=interface)
 
     # 3. Estrategia interfaz virtual
     mon_name = f"{interface}mon"
