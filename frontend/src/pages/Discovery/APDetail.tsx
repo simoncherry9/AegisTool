@@ -311,7 +311,20 @@ export function APDetail() {
                   <div style={{ color: 'var(--green)', fontWeight: 700, textAlign: 'center', marginTop: 8, animation: 'pulse 2s infinite' }}>
                     ✓ ¡Handshake Verificado y Capturado!
                   </div>
-                  {hsStatus.artifact_id && (
+                  
+                  {/* Mostrar las rutas para que el usuario pueda usarlas manualmente */}
+                  <div style={{ marginTop: 16, background: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 6, fontSize: 12 }}>
+                    <div style={{ marginBottom: 4 }}>
+                      <strong style={{ color: 'var(--text-muted)' }}>Ruta PCAP:</strong><br/>
+                      <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{hsStatus.pcap_path || 'No disponible'}</span>
+                    </div>
+                    <div>
+                      <strong style={{ color: 'var(--text-muted)' }}>Ruta Hash:</strong><br/>
+                      <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{hsStatus.hash_path || 'No disponible'}</span>
+                    </div>
+                  </div>
+
+                  {hsStatus.artifact_id ? (
                     <button 
                       className="btn btn-primary" 
                       style={{ width: '100%', marginTop: 12, background: 'var(--blue)' }} 
@@ -319,6 +332,10 @@ export function APDetail() {
                     >
                       Ir a Cracking (Crackear Hash) →
                     </button>
+                  ) : (
+                    <div className="callout callout-warning" style={{ marginTop: 12, fontSize: 12 }}>
+                      No se pudo asociar a un Artifact automáticamente. Ve a la pestaña 'Validar Captura' y usa la ruta PCAP de arriba.
+                    </div>
                   )}
                 </>
               )}
