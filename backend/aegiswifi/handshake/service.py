@@ -223,6 +223,18 @@ async def _monitor_capture(capture_id: str) -> None:
         log.error("capture monitoring error", capture_id=capture_id, error=str(exc))
         entry["status"] = CaptureStatus.FAILED
         entry["error"] = str(exc)
+    finally:
+        # Garantizar que airodump-ng se detenga SIEMPRE (incluso en caso de error/cancelación)
+        if proc and proc.returncode is None:
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
 
 
 async def _check_handshake(cap_path: str, bssid: str) -> bool:
