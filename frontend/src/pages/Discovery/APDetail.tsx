@@ -327,6 +327,15 @@ export function APDetail() {
                   {hsStatus.error}
                 </div>
               )}
+              {['complete', 'failed', 'stopped'].includes(hsStatus.status) && (
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ width: '100%', marginTop: 12 }} 
+                  onClick={() => setHsStatus(null)}
+                >
+                  Cerrar
+                </button>
+              )}
             </div>
           )}
         </div>

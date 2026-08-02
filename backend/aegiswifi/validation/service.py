@@ -382,8 +382,8 @@ class HandshakeValidationService:
 
         artifact = HandshakeArtifact(
             capture_id=capture.id,
-            access_point_id=None,
-            station_id=None,
+            access_point_id=capture.access_point_id,
+            station_id=capture.station_id,
             kind=result.kind,
             message_pair=result.message_pair,
             quality=quality_map.get(result.quality, HandshakeQuality.INVALID),
