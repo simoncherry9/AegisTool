@@ -173,13 +173,29 @@ async def _monitor_capture(capture_id: str) -> None:
         # Post-procesamiento
         if entry["handshake_detected"]:
             entry["status"] = CaptureStatus.CONVERTING
-            hash_path = await _convert_to_22000(str(cap_path))
+            hash_path, conv_error = await _convert_to_22000(str(cap_path))
             if hash_path:
                 entry["hash_path"] = hash_path
                 entry["status"] = CaptureStatus.COMPLETE
+                
+                # Integrar con ValidationService para que aparezca en el apartado de handshakes
+                try:
+                    from aegiswifi.database.engine import SessionLocal
+                    from aegiswifi.validation.service import get_validation_service
+                    from aegiswifi.database.models import Capture as DBCapture
+                    with SessionLocal() as db_session:
+                        # Crear registro de Capture en DB si no existe (simplificado)
+                        db_cap = DBCapture(path=str(cap_path), interface=entry["interface"], status="COMPLETED")
+                        db_session.add(db_cap)
+                        db_session.commit()
+                        
+                        val_service = get_validation_service()
+                        await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
+                except Exception as e:
+                    log.error("Error al validar automáticamente el handshake", error=str(e))
             else:
                 entry["status"] = CaptureStatus.COMPLETE
-                entry["error"] = "Handshake detectado pero conversión a .22000 falló"
+                entry["error"] = f"Conversión falló: {conv_error}"
         elif entry["status"] == CaptureStatus.CAPTURING:
             entry["status"] = CaptureStatus.FAILED
             entry["error"] = "Timeout: no se detectó handshake en el tiempo establecido"
@@ -204,16 +220,41 @@ async def _check_handshake(cap_path: str, bssid: str) -> bool:
     return "1 handshake" in combined or "wpa (1 handshake)" in combined or "handshake" in combined
 
 
-async def _convert_to_22000(cap_path: str) -> str | None:
+async def _convert_to_22000(cap_path: str) -> tuple[str | None, str | None]:
     """Convierte un .cap con handshake a formato .22000 para Hashcat."""
     hash_path = cap_path.replace(".cap", ".22000")
+    
+    # 1. Intentar con hcxpcapngtool (estándar moderno)
     stdout, stderr, rc = await run_privileged_cmd(
         ["hcxpcapngtool", "-o", hash_path, cap_path],
         timeout=15,
     )
     if Path(hash_path).exists() and Path(hash_path).stat().st_size > 0:
-        return hash_path
-    return None
+        return hash_path, None
+        
+    error_hcx = stderr.strip() if stderr else stdout.strip()
+    
+    # 2. Fallback a aircrack-ng -j (Aircrack >= 1.7 genera .hc22000)
+    # Aircrack-ng añade automáticamente la extensión, así que le pasamos el prefijo
+    prefix_path = cap_path.replace(".cap", "")
+    await run_privileged_cmd(
+        ["aircrack-ng", cap_path, "-j", prefix_path],
+        timeout=15,
+    )
+    
+    # Aircrack-ng puede generar archivo.hc22000 o archivo.hccapx
+    possible_outputs = [f"{prefix_path}.hc22000", f"{prefix_path}.hccapx", f"{prefix_path}.22000"]
+    for p in possible_outputs:
+        if Path(p).exists() and Path(p).stat().st_size > 0:
+            # Renombrar al estándar interno (.22000)
+            if p != hash_path:
+                try:
+                    Path(p).rename(hash_path)
+                except Exception:
+                    pass
+            return hash_path, None
+            
+    return None, f"hcxpcapngtool: {error_hcx} | aircrack-ng fallback también falló."
 
 
 async def stop_capture(capture_id: str) -> HandshakeCaptureStatusRead | None:

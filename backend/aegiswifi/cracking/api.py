@@ -107,37 +107,6 @@ def list_rules(
     return _rules_manager.scan_all(force=force_rescan)
 
 
-@router.get("/dictionaries/system")
-def list_system_wordlists() -> list[str]:
-    from aegiswifi.cracking.dictionary import scan_system_wordlists
-    return scan_system_wordlists()
-
-
-class CustomWordlistReq(BaseModel):
-    name: str
-    words: list[str]
-
-
-@router.post("/dictionaries/custom")
-def create_custom_wordlist_route(req: CustomWordlistReq):
-    from aegiswifi.cracking.dictionary import create_custom_wordlist
-    path = create_custom_wordlist(req.name, req.words)
-    return {"path": path}
-
-
-@router.delete("/dictionaries/custom/{name}")
-def delete_custom_wordlist_route(name: str):
-    from aegiswifi.cracking.dictionary import delete_custom_wordlist
-    success = delete_custom_wordlist(name)
-    if not success:
-        raise HTTPException(status_code=404, detail="Wordlist not found")
-    return {"status": "deleted"}
-
-
-@router.get("/engines")
-def list_engines():
-    return ["hashcat", "john"]
-
 
 
 # ===================================================================

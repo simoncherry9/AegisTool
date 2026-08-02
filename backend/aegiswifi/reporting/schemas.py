@@ -8,9 +8,9 @@ from pydantic import BaseModel
 
 
 class ReportFormat(str, Enum):
-    HTML = "HTML"
-    PDF = "PDF"
-    JSON = "JSON"
+    HTML = "html"
+    PDF = "pdf"
+    JSON = "json"
 
 
 class ReportStatusEnum(str, Enum):

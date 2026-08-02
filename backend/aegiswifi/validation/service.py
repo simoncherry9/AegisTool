@@ -110,10 +110,27 @@ class HandshakeValidationService:
             result.tool_output = (stdout + stderr)[:2000]
 
             if not Path(output_path).is_file() or os.path.getsize(output_path) == 0:
-                result.errors.append(
-                    "hcxpcapngtool no generó archivo de salida"
-                )
-                return result
+                # Fallback a aircrack-ng -j si hcxpcapngtool falla
+                from aegiswifi.core.privileged import run_privileged_cmd
+                prefix_path = str(source_path).replace(".cap", "").replace(".pcap", "")
+                await run_privileged_cmd(["aircrack-ng", str(source_path), "-j", prefix_path], timeout=15)
+                
+                # Check possible output files
+                for p in [f"{prefix_path}.hc22000", f"{prefix_path}.hccapx", f"{prefix_path}.22000"]:
+                    if Path(p).exists() and Path(p).stat().st_size > 0:
+                        import shutil
+                        shutil.copy2(p, output_path)
+                        result.errors.append("hcxpcapngtool falló, pero se recuperó usando aircrack-ng -j")
+                        break
+                        
+                if not Path(output_path).is_file() or os.path.getsize(output_path) == 0:
+                    result.errors.append("Ni hcxpcapngtool ni aircrack-ng lograron extraer el handshake (posiblemente incompleto o corrupto).")
+                    
+                    # Guardar el artifact de todos modos para que el usuario sepa que falló la validación
+                    if db_session and capture:
+                        artifact = self._persist_artifact(db_session, capture, result, "")
+                        result.artifact_id = artifact.id
+                    return result
 
             # Analizar el archivo .22000 generado.
             self._analyze_hashfile(Path(output_path), result)
