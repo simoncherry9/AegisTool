@@ -70,6 +70,25 @@ async def validate_capture(
             detail="Se requiere capture_id o file_path",
         )
 
+    if not capture and req.file_path:
+        # Si se envía solo el file_path manual, debemos crear un Capture 
+        # en la base de datos para poder persistir el Artifact.
+        from aegiswifi.database.models import Engagement, EngagementStatus
+        eng_id = req.engagement_id
+        if not eng_id:
+            active_eng = db.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
+            eng_id = active_eng.id if active_eng else 1
+            
+        capture = Capture(
+            engagement_id=eng_id,
+            path=req.file_path,
+            category="handshake",
+            format="pcapng"
+        )
+        db.add(capture)
+        db.commit()
+        db.refresh(capture)
+
     result = await service.validate_capture(
         capture=capture,
         file_path=req.file_path,
