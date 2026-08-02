@@ -24,7 +24,7 @@ async def send_deauth(
     reason: str | None = None,
 ) -> DeauthResult:
     entry_id = str(uuid.uuid4())[:8]
-    args = ["--deauth", str(count), "-a", bssid]
+    args = ["--deauth", str(count), "-a", bssid, "--ignore-negative-one"]
     if client_mac:
         args.extend(["-c", client_mac])
     args.append(interface)

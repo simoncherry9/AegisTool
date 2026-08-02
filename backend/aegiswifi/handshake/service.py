@@ -55,7 +55,6 @@ async def start_capture(
         "--bssid", bssid,
         "--write", output_prefix,
         "--write-interval", "1",
-        "--output-format", "cap",
     ]
     if channel:
         args.extend(["--channel", str(channel)])
@@ -126,6 +125,7 @@ async def _monitor_capture(capture_id: str) -> None:
                 deauth_args = [
                     "--deauth", str(deauth_count),
                     "-a", bssid,
+                    "--ignore-negative-one",
                     interface,
                 ]
                 await run_aireplay_privileged(deauth_args, timeout=15)
@@ -197,11 +197,11 @@ async def _monitor_capture(capture_id: str) -> None:
 async def _check_handshake(cap_path: str, bssid: str) -> bool:
     """Verifica si un archivo .cap contiene un handshake EAPOL completo."""
     stdout, stderr, rc = await run_privileged_cmd(
-        ["hcxpcapngtool", "-o", "/dev/null", cap_path],
+        ["aircrack-ng", cap_path],
         timeout=15,
     )
     combined = (stdout + stderr).lower()
-    return "eapol" in combined or "handshake" in combined
+    return "1 handshake" in combined or "wpa (1 handshake)" in combined or "handshake" in combined
 
 
 async def _convert_to_22000(cap_path: str) -> str | None:
