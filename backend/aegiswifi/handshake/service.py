@@ -149,14 +149,17 @@ async def _monitor_capture(capture_id: str) -> None:
             if proc.returncode is not None:
                 break
 
-            # Verificar si el cap file tiene handshake
+            # Verificar si el cap file tiene un handshake válido convertible
             if cap_path.exists() and cap_path.stat().st_size > 0:
-                # Usar tshark o hcxpcapngtool para verificar EAPOL
-                has_hs = await _check_handshake(str(cap_path), bssid)
-                if has_hs:
+                # En lugar de usar aircrack-ng (que da falsos positivos), 
+                # forzamos la conversión real a .22000. Si esto tiene éxito,
+                # sabemos 100% que el handshake es válido y podemos detener la captura.
+                hash_path, conv_error = await _convert_to_22000(str(cap_path))
+                if hash_path:
                     entry["handshake_detected"] = True
                     entry["pcap_path"] = str(cap_path)
-                    log.info("handshake detected", bssid=bssid, capture_id=capture_id)
+                    entry["hash_path"] = hash_path
+                    log.info("handshake detected and converted successfully", bssid=bssid, capture_id=capture_id)
                     break
 
             await asyncio.sleep(2)
@@ -171,34 +174,27 @@ async def _monitor_capture(capture_id: str) -> None:
                 await proc.wait()
 
         # Post-procesamiento
-        if entry["handshake_detected"]:
-            entry["status"] = CaptureStatus.CONVERTING
-            hash_path, conv_error = await _convert_to_22000(str(cap_path))
-            if hash_path:
-                entry["hash_path"] = hash_path
-                entry["status"] = CaptureStatus.COMPLETE
-                
-                # Integrar con ValidationService para que aparezca en el apartado de handshakes
-                try:
-                    from aegiswifi.database.engine import SessionLocal
-                    from aegiswifi.validation.service import get_validation_service
-                    from aegiswifi.database.models import Capture as DBCapture
-                    with SessionLocal() as db_session:
-                        # Crear registro de Capture en DB si no existe (simplificado)
-                        db_cap = DBCapture(path=str(cap_path), interface=entry["interface"], status="COMPLETED")
-                        db_session.add(db_cap)
-                        db_session.commit()
-                        
-                        val_service = get_validation_service()
-                        await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
-                except Exception as e:
-                    log.error("Error al validar automáticamente el handshake", error=str(e))
-            else:
-                entry["status"] = CaptureStatus.COMPLETE
-                entry["error"] = f"Conversión falló: {conv_error}"
+        if entry["handshake_detected"] and entry.get("hash_path"):
+            entry["status"] = CaptureStatus.COMPLETE
+            
+            # Integrar con ValidationService para que aparezca en el apartado de handshakes
+            try:
+                from aegiswifi.database.engine import SessionLocal
+                from aegiswifi.validation.service import get_validation_service
+                from aegiswifi.database.models import Capture as DBCapture
+                with SessionLocal() as db_session:
+                    # Crear registro de Capture en DB si no existe (simplificado)
+                    db_cap = DBCapture(path=str(cap_path), interface=entry["interface"], status="COMPLETED")
+                    db_session.add(db_cap)
+                    db_session.commit()
+                    
+                    val_service = get_validation_service()
+                    await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
+            except Exception as e:
+                log.error("Error al validar automáticamente el handshake", error=str(e))
         elif entry["status"] == CaptureStatus.CAPTURING:
             entry["status"] = CaptureStatus.FAILED
-            entry["error"] = "Timeout: no se detectó handshake en el tiempo establecido"
+            entry["error"] = "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
 
         # Guardar pcap_path si existe
         if cap_path.exists():

@@ -306,9 +306,9 @@ export function APDetail() {
                 }} />
               </div>
 
-              {hsStatus.handshake_detected && (
+              {hsStatus.status === 'complete' && !hsStatus.error && hsStatus.hash_path && (
                 <div style={{ color: 'var(--green)', fontWeight: 700, textAlign: 'center', marginTop: 8, animation: 'pulse 2s infinite' }}>
-                  ✓ ¡Handshake Capturado!
+                  ✓ ¡Handshake Verificado y Capturado!
                 </div>
               )}
               {hsStatus.error && (
