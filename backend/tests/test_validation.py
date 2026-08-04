@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from aegiswifi.database.models import Capture, Engagement
 from aegiswifi.validation.schemas import (
     EapolAnalysis,
     HandshakeReport,
@@ -270,10 +273,11 @@ class TestHandshakeValidationService:
         assert service._resolve_source(None, None) is None
 
     def test_is_full_handshake_m3(self) -> None:
-        """03 en message_pair indica handshake completo."""
+        """El bitmask 03 no significa un handshake completo."""
         service = HandshakeValidationService()
-        assert service._is_full_handshake("03") is True
-        assert service._is_full_handshake("M1M3") is True
+        assert service._is_full_handshake("03") is False
+        assert service._is_full_handshake("M1M3") is False
+        assert service._is_full_handshake("M1M2M3") is True
 
     def test_is_full_handshake_incomplete(self) -> None:
         """Solo M1+M2 no es handshake completo."""
@@ -294,7 +298,7 @@ class TestHandshakeValidationService:
         assert score == 0.0
 
     def test_score_m1m2_only(self) -> None:
-        """Solo M1+M2 da score 0.35."""
+        """M1+M2 extraído a 22000 es utilizable por hashcat."""
         service = HandshakeValidationService()
         result = ValidationResult(
             eapol=EapolAnalysis(
@@ -304,7 +308,7 @@ class TestHandshakeValidationService:
             ),
         )
         score = service._compute_score(result)
-        assert score == pytest.approx(0.35)  # M1=0.10 + M2=0.25
+        assert score == pytest.approx(0.75)
 
     def test_score_m1m2m3(self) -> None:
         """M1+M2+M3 da 0.55 + 0.10 bonus = 0.65."""
@@ -317,7 +321,7 @@ class TestHandshakeValidationService:
             ),
         )
         score = service._compute_score(result)
-        assert score == pytest.approx(0.65)  # 0.55 + 0.10 bonus
+        assert score == pytest.approx(0.85)
 
     def test_score_full_handshake(self) -> None:
         """M1+M2+M3+M4 da 0.70 + 0.10 bonus = 0.80."""
@@ -330,7 +334,7 @@ class TestHandshakeValidationService:
             ),
         )
         score = service._compute_score(result)
-        assert score == pytest.approx(0.80)  # 0.70 + 0.10
+        assert score == pytest.approx(0.85)
 
     def test_score_full_handshake_plus_pmkid(self) -> None:
         """Completo + PMKID da 1.0 (cap)."""
@@ -344,7 +348,7 @@ class TestHandshakeValidationService:
             pmkid=PmkidAnalysis(detected=True),
         )
         score = service._compute_score(result)
-        assert score == pytest.approx(1.0)  # 0.70 + 0.10 + 0.30 + 0.05 → capped
+        assert score == pytest.approx(0.85)
 
     def test_score_pmkid_plus_m12_bonus(self) -> None:
         """PMKID + M1+M2 recibe bonus extra."""
@@ -358,7 +362,7 @@ class TestHandshakeValidationService:
             pmkid=PmkidAnalysis(detected=True),
         )
         score = service._compute_score(result)
-        assert score == pytest.approx(0.70)  # 0.10+0.25+0.30+0.05
+        assert score == pytest.approx(0.80)
 
     # ------------------------------------------------------------------
     # Clasificación
@@ -373,7 +377,7 @@ class TestHandshakeValidationService:
         ), pmkid=PmkidAnalysis(detected=True))
         service._classify_quality(result)
         assert result.quality == QualityClassification.EXCELLENT
-        assert result.quality_score > 0.85
+        assert result.quality_score >= 0.85
         assert result.validated is True
 
     def test_classify_good(self) -> None:
@@ -384,31 +388,30 @@ class TestHandshakeValidationService:
             has_full_handshake=True,
         ))
         service._classify_quality(result)
-        assert result.quality == QualityClassification.GOOD
+        assert result.quality == QualityClassification.EXCELLENT
         assert result.validated is True
 
     def test_classify_acceptable(self) -> None:
-        """PMKID (0.30) + M2 (0.25) = 0.55 ≥ 0.50 → ACCEPTABLE."""
+        """Un PMKID convertido correctamente es apto para auditoría."""
         service = HandshakeValidationService()
         result = ValidationResult(
             pmkid=PmkidAnalysis(detected=True),
             eapol=EapolAnalysis(
                 messages_found=["M2"],
-                pairs_complete=["02"],
+                pairs_complete=[],
             ),
         )
         service._classify_quality(result)
-        assert result.quality == QualityClassification.ACCEPTABLE
+        assert result.quality == QualityClassification.GOOD
         assert result.quality_score >= 0.50
         assert result.validated is True
 
     def test_classify_poor(self) -> None:
-        """M1 (0.10) + M4 (0.15) = 0.25 ≥ 0.20 → POOR."""
+        """Un par no verificado se conserva, pero no habilita cracking."""
         service = HandshakeValidationService()
         result = ValidationResult(eapol=EapolAnalysis(
-            messages_found=["M1", "M4"],
-            pairs_complete=["M1M4"],
-            has_m14=True,
+                messages_found=["M2", "M3"],
+                pairs_complete=["M2M3_UNCHECKED"],
         ))
         service._classify_quality(result)
         assert result.quality == QualityClassification.POOR
@@ -429,39 +432,51 @@ class TestHandshakeValidationService:
 
     @staticmethod
     def _sample_22000_line(
-        msg_pair: str = "02",
-        bssid: str = "AA:BB:CC:DD:EE:FF",
-        station: str = "11:22:33:44:55:66",
-        essid: str = "TestNet",
+        msg_pair: str = "00",
+        bssid: str = "aabbccddeeff",
+        station: str = "112233445566",
+        essid: str = "546573744e6574",
     ) -> str:
-        """Genera una línea fake en formato 22000."""
-        return f"WPA*01*{msg_pair}*{bssid}*{station}*{essid}*"
+        """Genera una línea EAPOL válida en formato 22000."""
+        return f"WPA*02*{'a' * 32}*{bssid}*{station}*{essid}*{'b' * 64}*0103*{msg_pair}"
 
     def test_parse_22000_line_m1m2(self) -> None:
         service = HandshakeValidationService()
         result = ValidationResult()
-        line = self._sample_22000_line(msg_pair="02")
+        line = self._sample_22000_line(msg_pair="00")
         service._parse_22000_line(line, result)
         assert result.eapol.has_m12 is True
-        assert result.eapol.pairs_complete == ["02"]
-        assert result.message_pair == "02"
+        assert result.eapol.pairs_complete == ["M1M2"]
+        assert result.message_pair == "00"
         assert result.kind == "eapol"
 
     def test_parse_22000_line_m1m4(self) -> None:
         service = HandshakeValidationService()
         result = ValidationResult()
-        line = self._sample_22000_line(msg_pair="04")
+        line = self._sample_22000_line(msg_pair="01")
         service._parse_22000_line(line, result)
         assert result.eapol.has_m14 is True
-        assert result.eapol.pairs_complete == ["04"]
+        assert result.eapol.pairs_complete == ["M1M4"]
 
-    def test_parse_22000_line_full(self) -> None:
+    def test_parse_22000_line_authorized_m2m3(self) -> None:
         service = HandshakeValidationService()
         result = ValidationResult()
-        line = self._sample_22000_line(msg_pair="03")
+        line = self._sample_22000_line(msg_pair="02")
         service._parse_22000_line(line, result)
-        assert result.eapol.has_full_handshake is True
-        assert result.eapol.pairs_complete == ["03"]
+        assert result.eapol.has_full_handshake is False
+        assert result.eapol.pairs_complete == ["M2M3"]
+
+    def test_parse_22000_pmkid(self) -> None:
+        service = HandshakeValidationService()
+        result = ValidationResult()
+        line = f"WPA*01*{'c' * 32}*aabbccddeeff*112233445566*546573744e6574***01"
+        service._parse_22000_line(line, result)
+        service._classify_quality(result)
+
+        assert result.kind == "pmkid"
+        assert result.pmkid.detected is True
+        assert result.quality == QualityClassification.GOOD
+        assert result.validated is True
 
     def test_parse_22000_non_wpa_line(self) -> None:
         """Líneas que no empiezan con WPA se ignoran."""
@@ -481,10 +496,10 @@ class TestHandshakeValidationService:
         """Múltiples líneas acumulan pares."""
         service = HandshakeValidationService()
         result = ValidationResult()
-        service._parse_22000_line(self._sample_22000_line(msg_pair="02"), result)
-        service._parse_22000_line(self._sample_22000_line(msg_pair="04"), result)
-        assert "02" in result.eapol.pairs_complete
-        assert "04" in result.eapol.pairs_complete
+        service._parse_22000_line(self._sample_22000_line(msg_pair="00"), result)
+        service._parse_22000_line(self._sample_22000_line(msg_pair="01"), result)
+        assert "M1M2" in result.eapol.pairs_complete
+        assert "M1M4" in result.eapol.pairs_complete
         assert len(result.eapol.pairs_complete) == 2
 
     # ------------------------------------------------------------------
@@ -495,8 +510,8 @@ class TestHandshakeValidationService:
         service = HandshakeValidationService()
         hash_file = tmp_path / "test.22000"
         hash_file.write_text(
-            "WPA*01*02*AA:BB:CC:DD:EE:FF*11:22:33:44:55:66*TestNet*\n"
-            "WPA*01*04*AA:BB:CC:DD:EE:FF*11:22:33:44:55:66*TestNet*\n"
+            self._sample_22000_line(msg_pair="00") + "\n"
+            + self._sample_22000_line(msg_pair="01") + "\n"
         )
         result = ValidationResult()
         service._analyze_hashfile(hash_file, result)
@@ -566,6 +581,79 @@ class TestHandshakeValidationService:
         capture = FakeCapture(id=99, path="")
         result = await service.validate_capture(capture=capture)
         assert result.quality == QualityClassification.INVALID
+
+    @pytest.mark.asyncio
+    async def test_validate_realistic_eapol_22000_output(self, tmp_path: Path, monkeypatch) -> None:
+        capture_file = tmp_path / "handshake.cap"
+        capture_file.write_bytes(b"pcap placeholder")
+        service = HandshakeValidationService()
+
+        async def fake_converter(_input_path: str, output_path: str) -> tuple[str, str]:
+            line = (
+                f"WPA*02*{'a' * 32}*aabbccddeeff*112233445566*546573744e6574*"
+                f"{'b' * 64}*0103*00\n"
+            )
+            Path(output_path).write_text(line, encoding="utf-8")
+            return "1 WPA handshake written", ""
+
+        monkeypatch.setattr(service, "_run_hcxpcapngtool", fake_converter)
+
+        result = await service.validate_capture(file_path=str(capture_file))
+
+        assert result.validated is True
+        assert result.quality == QualityClassification.GOOD
+        assert result.message_pair == "00"
+        assert result.eapol.has_m12 is True
+        assert result.hash22000_path is None
+
+    def test_validation_api_accepts_cap_and_returns_usable_result(
+        self,
+        client: TestClient,
+        db_session,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        engagement = Engagement(
+            code="ENG-VALIDATE-CAP",
+            name="Validación CAP",
+            client="Cliente",
+            operator="Operador",
+        )
+        db_session.add(engagement)
+        db_session.commit()
+        db_session.refresh(engagement)
+        capture_file = tmp_path / "handshake.cap"
+        capture_file.write_bytes(b"pcap placeholder")
+        service = get_validation_service()
+
+        async def fake_converter(_input_path: str, output_path: str) -> tuple[str, str]:
+            line = (
+                f"WPA*02*{'a' * 32}*aabbccddeeff*112233445566*546573744e6574*"
+                f"{'b' * 64}*0103*00\n"
+            )
+            Path(output_path).write_text(line, encoding="utf-8")
+            return "1 WPA handshake written", ""
+
+        monkeypatch.setattr(service, "_run_hcxpcapngtool", fake_converter)
+        monkeypatch.setattr(
+            "aegiswifi.core.config.get_settings",
+            lambda: SimpleNamespace(
+                paths=SimpleNamespace(evidence_dir=tmp_path / "evidence")
+            ),
+        )
+
+        response = client.post(
+            "/api/v1/validation/validate",
+            json={"file_path": str(capture_file), "engagement_id": engagement.id},
+        )
+
+        assert response.status_code == 200
+        result = response.json()["result"]
+        assert result["validated"] is True
+        assert result["quality"] == "GOOD"
+        capture = db_session.query(Capture).filter_by(engagement_id=engagement.id).one()
+        assert capture.format == "cap"
+        assert capture.sha256
 
     # ------------------------------------------------------------------
     # _parse_tool_line

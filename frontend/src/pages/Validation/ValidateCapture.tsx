@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { validationApi } from '../../api/validation'
+import { validationApi, type ValidationResult } from '../../api/validation'
 import { engagementsApi, type Engagement } from '../../api/engagements'
 import { useEffect } from 'react'
 
@@ -10,11 +10,17 @@ export function ValidateCapture() {
   const [engagementId, setEngagementId] = useState<number | undefined>()
   const [filePath, setFilePath] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+  const [result, setResult] = useState<ValidationResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    engagementsApi.list().then(setEngagements).catch(() => {})
+    engagementsApi.list()
+      .then(data => {
+        setEngagements(data)
+        const preferred = data.find(engagement => engagement.status === 'ACTIVE') || data[0]
+        setEngagementId(preferred?.id)
+      })
+      .catch(() => {})
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -23,17 +29,21 @@ export function ValidateCapture() {
       setError('La ruta del archivo es obligatoria')
       return
     }
+    if (!engagementId) {
+      setError('Selecciona un engagement para registrar la evidencia')
+      return
+    }
     setSubmitting(true)
     setError(null)
     setResult(null)
     try {
       const res = await validationApi.validate({
         file_path: filePath.trim(),
-        engagement_id: engagementId || null,
+        engagement_id: engagementId,
       })
-      setResult('Artifact #' + res.result.artifact_id + ' creado — Calidad: ' + res.result.quality)
-    } catch (e: any) {
-      setError(e.message || 'Error al validar')
+      setResult(res.result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al validar')
     } finally {
       setSubmitting(false)
     }
@@ -44,14 +54,25 @@ export function ValidateCapture() {
       <div className="detail-header">
         <div>
           <h1>Validar captura</h1>
-          <div className="subtitle">Analizar un archivo .pcapng en busca de handshakes</div>
+          <div className="subtitle">Analizar archivos .cap, .pcap o .pcapng en busca de EAPOL y PMKID</div>
         </div>
       </div>
 
       {error && <div className="callout callout-error">{error}</div>}
       {result && (
-        <div className="callout" style={{ borderLeft: '3px solid var(--green)' }}>
-          {result}
+        <div className={`callout ${result.validated ? 'callout-success' : 'callout-error'}`}>
+          <strong>{result.validated ? 'Captura utilizable' : 'Captura no utilizable'}</strong>
+          <div style={{ marginTop: 4 }}>
+            Calidad: {result.quality} · Puntaje: {Math.round(result.quality_score * 100)}%
+            {result.artifact_id ? ` · Artifact #${result.artifact_id}` : ''}
+          </div>
+          {result.message_pair && <div style={{ marginTop: 4 }}>Message pair: {result.message_pair}</div>}
+          {result.warnings?.map((warning, index) => (
+            <div key={`warning-${index}`} style={{ marginTop: 6 }}>Advertencia: {warning}</div>
+          ))}
+          {result.errors.map((validationError, index) => (
+            <div key={`error-${index}`} style={{ marginTop: 6 }}>{validationError}</div>
+          ))}
           <div style={{ marginTop: 8 }}>
             <button className="btn btn-sm btn-primary" onClick={() => navigate('/validation')}>Ver artifacts</button>
           </div>
@@ -61,14 +82,14 @@ export function ValidateCapture() {
       <div className="card">
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Ruta del archivo .pcapng</label>
+            <label className="form-label">Ruta del archivo de captura</label>
             <input className="form-input" value={filePath} onChange={e => setFilePath(e.target.value)}
-              placeholder="/home/user/captura.pcapng" required />
+              placeholder="/home/user/captura.cap" required />
           </div>
           <div className="form-group">
-            <label className="form-label">Engagement (opcional)</label>
+            <label className="form-label">Engagement</label>
             <select className="form-select" value={engagementId ?? ''} onChange={e => setEngagementId(Number(e.target.value) || undefined)}>
-              <option value="">Sin asociar</option>
+              <option value="" disabled>Seleccionar engagement</option>
               {engagements.map(e => (
                 <option key={e.id} value={e.id}>{e.code} — {e.name}</option>
               ))}

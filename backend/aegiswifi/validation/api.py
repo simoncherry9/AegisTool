@@ -10,12 +10,20 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from aegiswifi.database.engine import get_db
-from aegiswifi.database.models import Capture, HandshakeArtifact
+from aegiswifi.database.models import (
+    Capture,
+    Engagement,
+    EngagementStatus,
+    HandshakeArtifact,
+)
 from aegiswifi.validation.schemas import (
     HandshakeReport,
     ValidationRequest,
@@ -70,19 +78,51 @@ async def validate_capture(
         )
 
     if not capture and req.file_path:
-        # Si se envía solo el file_path manual, debemos crear un Capture
-        # en la base de datos para poder persistir el Artifact.
-        from aegiswifi.database.models import Engagement, EngagementStatus
+        source_path = Path(req.file_path).expanduser().resolve()
+        if not source_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Archivo de captura no encontrado: {source_path}",
+            )
+        capture_format = source_path.suffix.lower().lstrip(".")
+        if capture_format not in {"cap", "pcap", "pcapng"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Formato no soportado; utiliza .cap, .pcap o .pcapng",
+            )
 
         eng_id = req.engagement_id
-        if not eng_id:
+        if eng_id:
+            engagement = db.get(Engagement, eng_id)
+            if engagement is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Engagement #{eng_id} no encontrado",
+                )
+        else:
             active_eng = (
                 db.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
             )
-            eng_id = active_eng.id if active_eng else 1
+            if active_eng is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Selecciona un engagement antes de validar la captura",
+                )
+            eng_id = active_eng.id
+
+        sha256 = hashlib.sha256()
+        with source_path.open("rb") as source:
+            for chunk in iter(lambda: source.read(65536), b""):
+                sha256.update(chunk)
 
         capture = Capture(
-            engagement_id=eng_id, path=req.file_path, category="handshake", format="pcapng"
+            engagement_id=eng_id,
+            path=str(source_path),
+            category="handshake",
+            format=capture_format,
+            sha256=sha256.hexdigest(),
+            original_filename=source_path.name,
+            size_bytes=source_path.stat().st_size,
         )
         db.add(capture)
         db.commit()

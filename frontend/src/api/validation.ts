@@ -16,6 +16,7 @@ export interface ValidationResult {
   hash22000_path: string | null
   kind: string
   message_pair: string | null
+  warnings: string[]
   errors: string[]
 }
 

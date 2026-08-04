@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,18 @@ _RE_HANDSHAKE = re.compile(r"handshake", re.IGNORECASE)
 _RE_PMKID = re.compile(r"pmkid", re.IGNORECASE)
 _RE_WRITTEN = re.compile(r"written", re.IGNORECASE)
 _RE_EAPOL_MSG = re.compile(r"(M[1-4])", re.IGNORECASE)
+_HEX_32 = re.compile(r"^[0-9a-fA-F]{32}$")
+
+# Bits 0..2 del MESSAGEPAIR oficial de hashcat. Los pares 3 y 4 se
+# conservan como diagnóstico, pero no se consideran aptos para auditoría.
+_EAPOL_PAIR_INFO: dict[int, tuple[str, tuple[str, ...], float]] = {
+    0: ("M1M2", ("M1", "M2"), 0.75),
+    1: ("M1M4", ("M1", "M4"), 0.55),
+    2: ("M2M3", ("M2", "M3"), 0.85),
+    3: ("M2M3_UNCHECKED", ("M2", "M3"), 0.35),
+    4: ("M3M4_UNCHECKED", ("M3", "M4"), 0.35),
+    5: ("M3M4", ("M3", "M4"), 0.55),
+}
 
 
 class HandshakeValidationService:
@@ -125,10 +139,8 @@ class HandshakeValidationService:
                     f"{prefix_path}.22000",
                 ]:
                     if Path(p).exists() and Path(p).stat().st_size > 0:
-                        import shutil
-
                         shutil.copy2(p, output_path)
-                        result.errors.append(
+                        result.warnings.append(
                             "hcxpcapngtool falló, pero se recuperó usando aircrack-ng -j"
                         )
                         break
@@ -154,6 +166,7 @@ class HandshakeValidationService:
             if db_session and capture:
                 artifact = self._persist_artifact(db_session, capture, result, output_path)
                 result.artifact_id = artifact.id
+                result.hash22000_path = artifact.hash22000_path
 
             return result
 
@@ -164,8 +177,11 @@ class HandshakeValidationService:
             result.errors.append(f"Error durante validación: {exc}")
             return result
         finally:
-            # Limpiar archivo temporal si no se persiste.
-            if not result.artifact_id and Path(output_path).exists():
+            # El archivo de conversión siempre es temporal. Si no se persistió,
+            # no devolver una ruta que dejará de existir.
+            if not result.artifact_id and result.hash22000_path == output_path:
+                result.hash22000_path = None
+            if Path(output_path).exists():
                 os.unlink(output_path)
 
     # ------------------------------------------------------------------
@@ -175,9 +191,10 @@ class HandshakeValidationService:
     def _analyze_hashfile(self, hash_path: Path, result: ValidationResult) -> None:
         """Analiza el archivo .22000 generado por hcxpcapngtool.
 
-        El formato 22000 para WPA es::
+        Formatos aceptados::
 
-            WPA*01*message_pair*bssid*station*essid*...
+            WPA*01*PMKID*MAC_AP*MAC_CLIENT*ESSID***MESSAGEPAIR
+            WPA*02*MIC*MAC_AP*MAC_CLIENT*ESSID*NONCE_AP*EAPOL_CLIENT*MESSAGEPAIR
         """
         result.hash22000_path = str(hash_path)
         content = hash_path.read_text(encoding="utf-8", errors="replace")
@@ -195,48 +212,61 @@ class HandshakeValidationService:
     def _parse_22000_line(self, line: str, result: ValidationResult) -> None:
         """Parse una línea de formato 22000.
 
-        Formato esperado::
-
-            WPA*01*message_pair_hash*bssid*station*essid*...
+        Distingue PMKID (``WPA*01``) de EAPOL (``WPA*02``) y lee el
+        ``MESSAGEPAIR`` desde el noveno campo, no desde el MIC/PMKID.
         """
         if not line.startswith("WPA"):
             return
 
         fields = line.split("*")
-        if len(fields) < 6:
+        if len(fields) < 6 or fields[0] != "WPA":
             return
 
-        # message_pair indica qué mensajes EAPOL se capturaron.
-        msg_pair = fields[2] if len(fields) > 2 else ""
-        bssid = fields[3] if len(fields) > 3 else ""
-        station = fields[4] if len(fields) > 4 else ""
-        essid_section = fields[5] if len(fields) > 5 else ""
+        hash_type = fields[1]
+        if hash_type == "01":
+            pmkid = fields[2]
+            if not _HEX_32.fullmatch(pmkid):
+                return
+            result.kind = "pmkid"
+            result.pmkid.detected = True
+            result.pmkid.raw_value = pmkid
+            result.pmkid.hash_line = line[:80]
+            if result.message_pair is None:
+                result.message_pair = fields[8] if len(fields) > 8 and fields[8] else "PMKID"
+            return
 
-        # Limpiar essid (puede venir con prefijo).
-        essid = essid_section.rstrip("*").strip()
+        if hash_type != "02" or len(fields) < 9 or not _HEX_32.fullmatch(fields[2]):
+            return
 
-        # Actualizar resultado con info encontrada.
+        try:
+            pair_value = int(fields[8], 16)
+        except ValueError:
+            return
+        pair_info = _EAPOL_PAIR_INFO.get(pair_value & 0x07)
+        if pair_info is None:
+            return
+
+        pair_name, messages, pair_score = pair_info
         result.kind = "eapol"
-        if not result.eapol.has_full_handshake:
-            result.eapol.has_full_handshake = self._is_full_handshake(msg_pair)
-        if not result.eapol.has_m12:
-            result.eapol.has_m12 = "M1M2" in msg_pair or "02" in msg_pair
-        if not result.eapol.has_m14:
-            result.eapol.has_m14 = "M1M4" in msg_pair or "04" in msg_pair
+        for message in messages:
+            if message not in result.eapol.messages_found:
+                result.eapol.messages_found.append(message)
+        if pair_name not in result.eapol.pairs_complete:
+            result.eapol.pairs_complete.append(pair_name)
+        result.eapol.has_m12 = result.eapol.has_m12 or pair_name == "M1M2"
+        result.eapol.has_m14 = result.eapol.has_m14 or pair_name == "M1M4"
 
-        if msg_pair and msg_pair not in result.eapol.pairs_complete:
-            result.eapol.pairs_complete.append(msg_pair)
-
-        # Almacenar mejor mensaje de par.
-        if not result.message_pair or len(msg_pair) > len(result.message_pair or ""):
-            result.message_pair = msg_pair
+        current_score = self._score_message_pair(result.message_pair)
+        if result.message_pair is None or pair_score > current_score:
+            result.message_pair = fields[8].upper().zfill(2)
 
     def _is_full_handshake(self, msg_pair: str) -> bool:
         """Determina si el par de mensajes representa un handshake completo.
 
-        Handshake completo = al menos M1+M2+M3, detectado como 03 (M3 presente).
+        El campo MESSAGEPAIR de hashcat es un bitmask, no una enumeración de
+        mensajes. Esta función se conserva para entradas descriptivas antiguas.
         """
-        return "03" in msg_pair or "M1M3" in msg_pair
+        return "M1M2M3" in msg_pair or "M1M2M3M4" in msg_pair
 
     # ------------------------------------------------------------------
     # Clasificación de calidad
@@ -262,33 +292,46 @@ class HandshakeValidationService:
 
     def _compute_score(self, result: ValidationResult) -> float:
         """Computa un puntaje 0..1 para el handshake."""
-        score = 0.0
+        score = 0.75 if result.pmkid.detected else 0.0
         eapol = result.eapol
-        pmkid = result.pmkid
 
-        # Puntaje por mensajes EAPOL.
-        if "M1" in eapol.messages_found or "01" in str(eapol.pairs_complete):
-            score += self._SCORE_M1
-        if "M2" in eapol.messages_found or "02" in str(eapol.pairs_complete):
-            score += self._SCORE_M2
-        if "M3" in eapol.messages_found or "03" in str(eapol.pairs_complete):
-            score += self._SCORE_M3
-        if "M4" in eapol.messages_found or "04" in str(eapol.pairs_complete):
-            score += self._SCORE_M4
+        pair_scores = {info[0]: info[2] for info in _EAPOL_PAIR_INFO.values()}
+        for pair in eapol.pairs_complete:
+            score = max(score, pair_scores.get(pair, 0.0))
 
-        # Puntaje por PMKID.
-        if pmkid.detected:
-            score += self._SCORE_PMKID
+        # Compatibilidad con resultados descriptivos creados antes del parser 22000.
+        if not eapol.pairs_complete and eapol.messages_found:
+            legacy_score = 0.0
+            if "M1" in eapol.messages_found:
+                legacy_score += self._SCORE_M1
+            if "M2" in eapol.messages_found:
+                legacy_score += self._SCORE_M2
+            if "M3" in eapol.messages_found:
+                legacy_score += self._SCORE_M3
+            if "M4" in eapol.messages_found:
+                legacy_score += self._SCORE_M4
+            score = max(score, legacy_score)
 
         # Bonus por handshake completo.
         if eapol.has_full_handshake:
             score = min(score + 0.10, 1.0)
 
         # Bonus por PMKID + EAPOL juntos.
-        if pmkid.detected and eapol.has_m12:
+        if result.pmkid.detected and eapol.has_m12:
             score = min(score + 0.05, 1.0)
 
         return min(score, 1.0)
+
+    @staticmethod
+    def _score_message_pair(message_pair: str | None) -> float:
+        if not message_pair or message_pair == "PMKID":
+            return 0.75 if message_pair == "PMKID" else 0.0
+        try:
+            pair_value = int(message_pair, 16) & 0x07
+        except ValueError:
+            return 0.0
+        info = _EAPOL_PAIR_INFO.get(pair_value)
+        return info[2] if info else 0.0
 
     # ------------------------------------------------------------------
     # Ejecución de hcxpcapngtool
@@ -388,22 +431,30 @@ class HandshakeValidationService:
                 )
             )
 
-        artifact = HandshakeArtifact(
-            capture_id=capture.id,
-            access_point_id=access_point_id,
-            station_id=None,
-            kind=result.kind,
-            message_pair=result.message_pair,
-            quality=quality_map.get(result.quality, HandshakeQuality.INVALID),
-            validated=result.validated,
-            hash22000_path=hash22000_path,
+        artifact = db_session.scalar(
+            select(HandshakeArtifact).where(HandshakeArtifact.capture_id == capture.id)
         )
-        db_session.add(artifact)
+        if artifact is None:
+            artifact = HandshakeArtifact(capture_id=capture.id)
+            db_session.add(artifact)
+
+        artifact.access_point_id = access_point_id
+        artifact.station_id = None
+        artifact.kind = result.kind
+        artifact.message_pair = result.message_pair
+        artifact.quality = quality_map.get(result.quality, HandshakeQuality.INVALID)
+        artifact.validated = result.validated
+        artifact.hash22000_path = None
         db_session.commit()
         db_session.refresh(artifact)
 
-        # Copiar el archivo .22000 a data/ para persistencia.
-        self._persist_hashfile(artifact, hash22000_path)
+        # Copiar el archivo .22000 a data/ sin sobrescribir derivados anteriores.
+        if hash22000_path and Path(hash22000_path).is_file():
+            persisted_path = self._persist_hashfile(artifact, hash22000_path)
+            if persisted_path:
+                artifact.hash22000_path = persisted_path
+                db_session.commit()
+                db_session.refresh(artifact)
 
         return artifact
 
@@ -415,8 +466,7 @@ class HandshakeValidationService:
         dest_dir = settings.paths.evidence_dir / "hashes"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        dest = dest_dir / f"artifact_{artifact.id}.22000"
-        import shutil
+        dest = dest_dir / f"artifact_{artifact.id}_{uuid.uuid4().hex[:8]}.22000"
 
         try:
             shutil.copy2(temp_path, str(dest))
