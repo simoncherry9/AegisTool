@@ -132,10 +132,9 @@ function SudoConfigCard() {
   const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/v1/tools/sudo-status')
-      .then(res => res.json())
+    toolsApi.sudoStatus()
       .then(data => {
-        if (data.configured) setConfigured(true)
+        setConfigured(data.configured)
       })
       .catch(() => {})
   }, [])
@@ -147,21 +146,12 @@ function SudoConfigCard() {
     setMessage(null)
 
     try {
-      const res = await fetch('/api/v1/tools/sudo-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: sudoPass }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setConfigured(true)
-        setSudoPass('')
-        setMessage('Contraseña sudo de Kali cifrada y almacenada correctamente.')
-      } else {
-        setMessage(data.detail || 'Error al guardar contraseña')
-      }
-    } catch {
-      setMessage('Error al conectar con el servidor')
+      await toolsApi.configureSudo(sudoPass)
+      setConfigured(true)
+      setSudoPass('')
+      setMessage('Contraseña sudo de Kali cifrada y almacenada correctamente.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Error al conectar con el servidor')
     } finally {
       setLoading(false)
     }

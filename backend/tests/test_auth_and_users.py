@@ -94,3 +94,31 @@ def test_domain_api_requires_auth_when_enabled(client, monkeypatch):
     response = client.get("/api/v1/engagements")
 
     assert response.status_code == 401
+
+
+def test_admin_can_store_encrypted_sudo_password(client, db_session, monkeypatch, tmp_path):
+    admin = service.seed_default_admin(db_session)
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": admin.username, "password": "admin123"},
+    )
+    token = login.json()["access_token"]
+    env_file = tmp_path / ".env"
+    env_file.write_text("EXISTING=value\n", encoding="utf-8")
+    settings = SimpleNamespace(
+        security=SimpleNamespace(sudo_password=None),
+        paths=SimpleNamespace(data_dir=tmp_path / "data"),
+    )
+    monkeypatch.setattr("aegiswifi.tools.api.get_settings", lambda: settings)
+
+    response = client.post(
+        "/api/v1/tools/sudo-config",
+        json={"password": "sudo-test-password"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    stored = env_file.read_text(encoding="utf-8")
+    assert "sudo-test-password" not in stored
+    assert "AEGISWIFI_SECURITY__SUDO_PASSWORD=" in stored
+    assert settings.security.sudo_password

@@ -17,6 +17,19 @@ export interface ToolsCheckResult {
   os: string
 }
 
+export interface SudoStatus {
+  configured: boolean
+  masked: string | null
+}
+
+export interface SudoConfigResult {
+  status: string
+  message: string
+}
+
 export const toolsApi = {
   check: () => api.get<ToolsCheckResult>('/tools/check'),
+  sudoStatus: () => api.get<SudoStatus>('/tools/sudo-status'),
+  configureSudo: (password: string) =>
+    api.post<SudoConfigResult>('/tools/sudo-config', { password }),
 }
