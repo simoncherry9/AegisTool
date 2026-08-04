@@ -189,6 +189,7 @@ def analyze_handshake(
     warnings.extend(_validate_preferred_paths(preferred_dicts, "diccionario"))
     warnings.extend(_validate_preferred_paths(preferred_rules, "regla"))
 
+    capture = artifact.capture
     plan = _planner.build_plan(
         job_id=0,  # se asigna al crear el job
         artifact_id=artifact_id,
@@ -197,6 +198,8 @@ def analyze_handshake(
         preferred_dicts=preferred_dicts,
         preferred_rules=preferred_rules,
         skip_modes=skip_modes,
+        cap_file_path=capture.path if capture else None,
+        bssid=capture.bssid if capture else None,
     )
 
     if not plan.stages:
@@ -314,6 +317,7 @@ async def start_cracking_job(
             detail="; ".join(invalid),
         )
 
+    capture = artifact.capture
     plan = _planner.build_plan(
         job_id=job_id,
         artifact_id=artifact_id,
@@ -321,6 +325,8 @@ async def start_cracking_job(
         max_total_time=max_total_time,
         preferred_dicts=preferred_dicts,
         preferred_rules=preferred_rules,
+        cap_file_path=capture.path if capture else None,
+        bssid=capture.bssid if capture else None,
     )
 
     try:

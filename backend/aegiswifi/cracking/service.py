@@ -163,8 +163,11 @@ class CrackingService:
                 self._persist_progress(session, job.id, progress)
 
             # Crear adaptador para esta etapa.
+            # La etapa de diccionario con aircrack-ng usa el adaptador de
+            # aircrack-ng (CPU, sin GPU); el resto usa hashcat.
+            adapter_kind = "aircrack_crack" if stage.tool == "aircrack-ng" else "password_audit"
             adapter = get_adapter(
-                "password_audit",
+                adapter_kind,
                 job_id=job.id,
                 engagement_id=engagement_id,
                 event_bus=self._bus,
@@ -174,7 +177,9 @@ class CrackingService:
             self._active_adapters[job.id] = adapter
 
             # Construir opciones para esta etapa.
-            options = self._stage_to_options(stage, plan.hash_file_path, plan.hash_mode)
+            options = self._stage_to_options(
+                stage, plan, hash_file_path=plan.hash_file_path, hash_mode=plan.hash_mode
+            )
 
             # Ejecutar.
             try:
@@ -184,10 +189,12 @@ class CrackingService:
                 )
                 collected = await adapter.collect_results()
 
-                # Error real de hashcat (exit != 0/1): no confundir con "exhausted".
+                # Error real de la herramienta (exit != 0/1 para hashcat):
+                # no confundir con "exhausted".
                 if collected.get("error"):
                     error_message = collected.get("error_message") or (
-                        f"hashcat terminó con error (exit {collected.get('exit_code')})"
+                        f"{adapter.tool_name} terminó con error "
+                        f"(exit {collected.get('exit_code')})"
                     )
                     result.exit_code = collected.get("exit_code")
                     job.status = CrackJobStatus.FAILED.value
@@ -476,11 +483,27 @@ class CrackingService:
     @staticmethod
     def _stage_to_options(
         stage: AttackStage,
+        plan: CrackingPlan,
+        *,
         hash_file_path: str,
         hash_mode: int,
     ) -> dict[str, Any]:
-        """Convierte un AttackStage a dict de opciones para el adaptador."""
-        options: dict[str, Any] = {
+        """Convierte un AttackStage a dict de opciones para el adaptador.
+
+        Para etapas de aircrack-ng (``stage.tool == "aircrack-ng"``) se
+        pasan el archivo .cap y el BSSID; el resto son opciones de hashcat.
+        """
+        if stage.tool == "aircrack-ng":
+            options: dict[str, Any] = {
+                "cap_file": plan.cap_file_path,
+                "bssid": plan.bssid,
+                "attack_mode": stage.mode,
+            }
+            if stage.dictionary_path:
+                options["dictionary"] = stage.dictionary_path
+            return options
+
+        options = {
             "hash_file": hash_file_path,
             "hash_mode": hash_mode,
             "attack_mode": stage.mode,

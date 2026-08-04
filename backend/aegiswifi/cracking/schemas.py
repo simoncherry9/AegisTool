@@ -39,6 +39,9 @@ class AttackStage(BaseModel):
     mode: AttackMode
     """Modo de ataque de esta etapa."""
 
+    tool: str = "hashcat"
+    """Herramienta que ejecuta la etapa (``hashcat`` o ``aircrack-ng``)."""
+
     dictionary_path: str | None = None
     """Ruta al archivo de wordlist (obligatorio para dictionary / rule_based)."""
 
@@ -76,6 +79,12 @@ class CrackingPlan(BaseModel):
 
     hash_file_path: str
     """Ruta absoluta al archivo .22000 que contiene el hash objetivo."""
+
+    cap_file_path: str | None = None
+    """Ruta al archivo .cap original (requerida para etapas aircrack-ng)."""
+
+    bssid: str | None = None
+    """BSSID del AP objetivo (requerido para etapas aircrack-ng)."""
 
     hash_mode: int = 22000
     """Modo de hash (-m). 22000 = WPA-PBKDF2-PMKID+EAPOL."""

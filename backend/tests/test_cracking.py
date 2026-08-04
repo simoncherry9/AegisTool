@@ -571,6 +571,101 @@ class TestCrackingPlanner:
         assert path is not None
         assert "rockyou" in path
 
+    def test_build_plan_uses_aircrack_when_cap_available(self, tmp_path):
+        """Con .cap + BSSID + binario instalado, la 1ª etapa usa aircrack-ng."""
+        from unittest import mock
+
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        cap_file = tmp_path / "capture.cap"
+        cap_file.write_text("dummy pcap content")
+        dm = self._make_manager_with_dicts(tmp_path)
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        with mock.patch("aegiswifi.cracking.planner.shutil.which", return_value="/usr/bin/aircrack-ng"):
+            plan = planner.build_plan(
+                job_id=1,
+                artifact_id=1,
+                hash_file_path="/tmp/h.22000",
+                cap_file_path=str(cap_file),
+                bssid="AA:BB:CC:DD:EE:FF",
+            )
+
+        assert plan.stages
+        assert plan.cap_file_path == str(cap_file)
+        assert plan.bssid == "AA:BB:CC:DD:EE:FF"
+        first = plan.stages[0]
+        assert first.mode == AttackMode.DICTIONARY
+        assert first.tool == "aircrack-ng"
+        assert first.timeout_seconds == CrackingPlanner.AIRCRACK_TIMEOUT_SECONDS
+
+    def test_build_plan_falls_back_to_hashcat_without_cap(self, tmp_path):
+        """Sin .cap/BSSID la 1ª etapa de diccionario usa hashcat."""
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        dm = self._make_manager_with_dicts(tmp_path)
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        plan = planner.build_plan(
+            job_id=1,
+            artifact_id=1,
+            hash_file_path="/tmp/h.22000",
+        )
+
+        assert plan.stages
+        assert plan.cap_file_path is None
+        assert plan.stages[0].tool == "hashcat"
+        assert plan.stages[0].timeout_seconds == CrackingPlanner.DEFAULT_TIMEOUTS[AttackMode.DICTIONARY]
+
+    def test_build_plan_falls_back_when_aircrack_missing(self, tmp_path):
+        """Aunque haya .cap+BSSID, sin binario aircrack-ng se usa hashcat."""
+        from unittest import mock
+
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        cap_file = tmp_path / "capture.cap"
+        cap_file.write_text("dummy")
+        dm = self._make_manager_with_dicts(tmp_path)
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        with mock.patch("aegiswifi.cracking.planner.shutil.which", return_value=None):
+            plan = planner.build_plan(
+                job_id=1,
+                artifact_id=1,
+                hash_file_path="/tmp/h.22000",
+                cap_file_path=str(cap_file),
+                bssid="AA:BB:CC:DD:EE:FF",
+            )
+
+        assert plan.stages
+        assert plan.stages[0].tool == "hashcat"
+
+    def test_build_plan_falls_back_when_cap_missing_on_disk(self, tmp_path):
+        """Si el .cap no existe en disco, se cae a hashcat aunque haya BSSID."""
+        from unittest import mock
+
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        missing = str(tmp_path / "no_existe.cap")
+        dm = self._make_manager_with_dicts(tmp_path)
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        with mock.patch("aegiswifi.cracking.planner.shutil.which", return_value="/usr/bin/aircrack-ng"):
+            plan = planner.build_plan(
+                job_id=1,
+                artifact_id=1,
+                hash_file_path="/tmp/h.22000",
+                cap_file_path=missing,
+                bssid="AA:BB:CC:DD:EE:FF",
+            )
+
+        assert plan.stages
+        assert plan.stages[0].tool == "hashcat"
+
     def test_pick_preferred_rule_best64(self):
         from aegiswifi.cracking.planner import CrackingPlanner
 
@@ -982,6 +1077,89 @@ class TestCrackingService:
         assert job.status == CrackJobStatus.FAILED.value
         assert "No hashes loaded" in (job.error_message or "")
 
+    @pytest.mark.asyncio
+    async def test_execute_plan_aircrack_stage_uses_aircrack_adapter(self, db_session, tmp_path):
+        """Una etapa con tool=aircrack-ng debe enrutarse al adaptador aircrack_crack."""
+        from aegiswifi.cracking.service import CrackingService
+
+        engagement, artifact, job = self._authorized_job(db_session, tmp_path)
+
+        plan = CrackingPlan(
+            job_id=job.id,
+            artifact_id=artifact.id,
+            hash_file_path="/tmp/h.22000",
+            cap_file_path="/tmp/capture.cap",
+            bssid="AA:BB:CC:DD:EE:FF",
+            stages=[AttackStage(mode=AttackMode.DICTIONARY, tool="aircrack-ng", dictionary_path="/dicts/rockyou.txt")],
+        )
+
+        mock_adapter = AsyncMock()
+        mock_adapter.tool_name = "aircrack-ng"
+        mock_adapter.start = AsyncMock(return_value={"exit_code": 0, "log_path": "/tmp/log"})
+        mock_adapter.collect_results = AsyncMock(
+            return_value={
+                "cracked": True,
+                "password": "secret123",
+                "exit_code": 0,
+                "peak_speed": 0,
+            }
+        )
+
+        service = CrackingService(event_bus=MagicMock())
+
+        captured_kinds: list[str] = []
+
+        def _fake_get_adapter(kind: str, **kwargs):
+            captured_kinds.append(kind)
+            return mock_adapter
+
+        with patch("aegiswifi.cracking.service.get_adapter", side_effect=_fake_get_adapter):
+            result = await service._execute_with_session(
+                plan, engagement_id=engagement.id, session=db_session
+            )
+
+        assert captured_kinds == ["aircrack_crack"]
+        assert result.cracked is True
+        assert result.password == "secret123"
+
+        db_session.refresh(job)
+        assert job.recovered is True
+
+    def test_stage_to_options_aircrack(self):
+        """_stage_to_options para aircrack-ng pasa cap_file/bssid, no hash_file."""
+        from aegiswifi.cracking.service import CrackingService
+
+        plan = CrackingPlan(
+            job_id=1,
+            artifact_id=1,
+            hash_file_path="/tmp/h.22000",
+            cap_file_path="/tmp/capture.cap",
+            bssid="AA:BB:CC:DD:EE:FF",
+        )
+        stage = AttackStage(
+            mode=AttackMode.DICTIONARY, tool="aircrack-ng", dictionary_path="/dicts/rockyou.txt"
+        )
+        options = CrackingService._stage_to_options(
+            stage, plan, hash_file_path=plan.hash_file_path, hash_mode=plan.hash_mode
+        )
+        assert options["cap_file"] == "/tmp/capture.cap"
+        assert options["bssid"] == "AA:BB:CC:DD:EE:FF"
+        assert options["dictionary"] == "/dicts/rockyou.txt"
+        assert "hash_file" not in options
+
+    def test_stage_to_options_hashcat_unchanged(self):
+        """Las etapas hashcat siguen generando opciones con hash_file/hash_mode."""
+        from aegiswifi.cracking.service import CrackingService
+
+        plan = CrackingPlan(job_id=1, artifact_id=1, hash_file_path="/tmp/h.22000")
+        stage = AttackStage(mode=AttackMode.DICTIONARY, dictionary_path="/dicts/rockyou.txt")
+        options = CrackingService._stage_to_options(
+            stage, plan, hash_file_path=plan.hash_file_path, hash_mode=plan.hash_mode
+        )
+        assert options["hash_file"] == "/tmp/h.22000"
+        assert options["hash_mode"] == 22000
+        assert "cap_file" not in options
+
 
 # ===================================================================
 # HashcatAdapter Tests
@@ -1206,6 +1384,120 @@ class TestHashcatAdapter:
         result = await adapter.collect_results()
         assert result["error"] is True
         assert "No hashes loaded." in result["error_message"]
+
+
+# ===================================================================
+# AircrackNgAdapter Tests
+# ===================================================================
+
+
+class TestAircrackNgAdapter:
+    def _make_adapter(self):
+        from aegiswifi.cracking.aircrack_adapter import AircrackNgAdapter
+
+        config = MagicMock()
+        config.log_dir = "/tmp/logs"
+        return AircrackNgAdapter(
+            job_id=1,
+            engagement_id=1,
+            event_bus=MagicMock(),
+            config=config,
+        )
+
+    @pytest.mark.asyncio
+    async def test_build_command_dictionary(self):
+        adapter = self._make_adapter()
+        cmd = await adapter.build_command(
+            {
+                "cap_file": "/tmp/capture.cap",
+                "bssid": "AA:BB:CC:DD:EE:FF",
+                "dictionary": "/dicts/rockyou.txt",
+            }
+        )
+        assert "aircrack-ng" in cmd
+        assert "-a" in cmd
+        idx = cmd.index("-a")
+        assert cmd[idx + 1] == "2"
+        assert "-b" in cmd
+        bidx = cmd.index("-b")
+        assert cmd[bidx + 1] == "AA:BB:CC:DD:EE:FF"
+        assert "-w" in cmd
+        widx = cmd.index("-w")
+        assert cmd[widx + 1] == "/dicts/rockyou.txt"
+        assert "/tmp/capture.cap" in cmd
+
+    @pytest.mark.asyncio
+    async def test_build_command_without_dictionary(self):
+        adapter = self._make_adapter()
+        cmd = await adapter.build_command(
+            {
+                "cap_file": "/tmp/capture.cap",
+                "bssid": "AA:BB:CC:DD:EE:FF",
+            }
+        )
+        assert "-w" not in cmd
+
+    @pytest.mark.asyncio
+    async def test_parse_output_key_found(self):
+        adapter = self._make_adapter()
+        line = "                         KEY FOUND! [ password123 ]"
+        result = await adapter.parse_output(line)
+        assert result is not None
+        assert result["event"] == "password_cracked"
+        assert result["password"] == "password123"
+        assert adapter._cracked_password == "password123"
+
+    @pytest.mark.asyncio
+    async def test_parse_output_returns_none_for_other(self):
+        adapter = self._make_adapter()
+        assert await adapter.parse_output("Opening /tmp/capture.cap") is None
+        assert await adapter.parse_output("") is None
+
+    @pytest.mark.asyncio
+    async def test_collect_results_cracked(self):
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 0, "log_path": "/tmp/log"}
+        adapter._cracked_password = "secret123"
+        result = await adapter.collect_results()
+        assert result["cracked"] is True
+        assert result["password"] == "secret123"
+        assert result["error"] is False
+
+    @pytest.mark.asyncio
+    async def test_collect_results_not_cracked_is_exhausted(self):
+        """Exit 0 sin KEY FOUND = keyspace agotado, no error."""
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 0, "log_path": None}
+        adapter._cracked_password = None
+        result = await adapter.collect_results()
+        assert result["cracked"] is False
+        assert result["error"] is False
+
+    @pytest.mark.asyncio
+    async def test_collect_results_error_exit_is_error(self):
+        """Exit != 0 (cap ilegible, wordlist inexistente) = error real."""
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 1, "log_path": None}
+        adapter._cracked_password = None
+        result = await adapter.collect_results()
+        assert result["cracked"] is False
+        assert result["error"] is True
+        assert "código de salida 1" in result["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_extract_password_from_log(self, tmp_path):
+        log = tmp_path / "aircrack.log"
+        log.write_text(
+            "Aircrack-ng 1.7\n"
+            "[00:00:00] 1/1 keys tested (100.00 k/s)\n"
+            "                         KEY FOUND! [ found_from_log ]\n"
+        )
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 0, "log_path": str(log)}
+        adapter._cracked_password = None
+        result = await adapter.collect_results()
+        assert result["cracked"] is True
+        assert result["password"] == "found_from_log"
 
 
 # ===================================================================

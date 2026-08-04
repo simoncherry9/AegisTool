@@ -38,6 +38,7 @@ export interface AnalyzePlan {
     max_total_time: number
     stages: Array<{
       mode: string
+      tool?: string
       dictionary_path: string | null
       rules_path: string | null
       mask: string | null

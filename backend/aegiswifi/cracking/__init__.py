@@ -10,6 +10,11 @@ Expone:
 
 from __future__ import annotations
 
+from aegiswifi.cracking.aircrack_adapter import AircrackNgAdapter
+from aegiswifi.cracking.dictionary import DictionaryManager
+from aegiswifi.cracking.hashcat_adapter import HashcatAdapter
+from aegiswifi.cracking.planner import CrackingPlanner
+from aegiswifi.cracking.rules import RulesManager
 from aegiswifi.cracking.schemas import (
     AttackMode,
     AttackStage,
@@ -20,10 +25,6 @@ from aegiswifi.cracking.schemas import (
     HashInfo,
     RuleInfo,
 )
-from aegiswifi.cracking.hashcat_adapter import HashcatAdapter
-from aegiswifi.cracking.dictionary import DictionaryManager
-from aegiswifi.cracking.rules import RulesManager
-from aegiswifi.cracking.planner import CrackingPlanner
 from aegiswifi.cracking.service import CrackingService, get_cracking_service
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "HashInfo",
     "RuleInfo",
     "HashcatAdapter",
+    "AircrackNgAdapter",
     "DictionaryManager",
     "RulesManager",
     "CrackingPlanner",

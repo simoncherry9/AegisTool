@@ -172,12 +172,13 @@ export function CrackingAnalyze() {
           <div className="card-header"><div className="card-title">Plan de ataque ({plan.plan.stages.length} etapas)</div></div>
           <div className="table-container">
             <table>
-              <thead><tr><th>#</th><th>Modo</th><th>Diccionario</th><th>Regla</th><th>Prioridad</th><th>Tiempo estimado</th></tr></thead>
+              <thead><tr><th>#</th><th>Modo</th><th>Herramienta</th><th>Diccionario</th><th>Regla</th><th>Prioridad</th><th>Tiempo estimado</th></tr></thead>
               <tbody>
                 {plan.plan.stages.map((s, i) => (
                   <tr key={i}>
                     <td>{i + 1}</td>
                     <td><span className="badge">{s.mode}</span></td>
+                    <td><span className="badge badge-info">{s.tool || 'hashcat'}</span></td>
                     <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{s.dictionary_path || '—'}</td>
                     <td style={{ fontSize: 12 }}>{s.rules_path || '—'}</td>
                     <td>{i + 1}</td>

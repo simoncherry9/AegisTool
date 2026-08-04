@@ -6,6 +6,7 @@ antes que lentas: diccionario → reglas → combinator → máscara → fuerza 
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,9 @@ class CrackingPlanner:
         AttackMode.BRUTE_FORCE: 3600,  # 60 min
     }
 
+    # Timeout para la etapa de diccionario con aircrack-ng (CPU puro).
+    AIRCRACK_TIMEOUT_SECONDS = 600
+
     def __init__(
         self,
         dict_manager: DictionaryManager,
@@ -62,6 +66,8 @@ class CrackingPlanner:
         preferred_dicts: list[str] | None = None,
         preferred_rules: list[str] | None = None,
         skip_modes: list[AttackMode] | None = None,
+        cap_file_path: str | None = None,
+        bssid: str | None = None,
     ) -> CrackingPlan:
         """Construye un plan secuencial multi-etapa.
 
@@ -74,6 +80,9 @@ class CrackingPlanner:
             preferred_dicts: Lista de paths de wordlists preferidas.
             preferred_rules: Lista de paths de reglas preferidas.
             skip_modes: Modos de ataque a excluir.
+            cap_file_path: Ruta al .cap original (activa la etapa de
+                aircrack-ng como primera opción de diccionario).
+            bssid: BSSID del AP objetivo (requerido por aircrack-ng).
 
         Returns:
             :class:`CrackingPlan` con etapas en orden de ejecución.
@@ -89,17 +98,29 @@ class CrackingPlanner:
 
         stages: list[AttackStage] = []
 
-        # --- Etapa 1: Dictionary attack (rockyou u otras) ---
+        # --- Etapa 1: Dictionary attack ---
+        # Si hay un .cap original y BSSID, usamos aircrack-ng (CPU, sin GPU)
+        # antes que hashcat. Es la opción preferida en VM sin tarjeta gráfica.
         if AttackMode.DICTIONARY not in skip:
             dict_path = self._pick_preferred_dict(dicts, preferred_dicts)
             if dict_path:
-                stages.append(
-                    AttackStage(
-                        mode=AttackMode.DICTIONARY,
-                        dictionary_path=dict_path,
-                        timeout_seconds=self.DEFAULT_TIMEOUTS[AttackMode.DICTIONARY],
+                if self._aircrack_ready(cap_file_path, bssid):
+                    stages.append(
+                        AttackStage(
+                            mode=AttackMode.DICTIONARY,
+                            tool="aircrack-ng",
+                            dictionary_path=dict_path,
+                            timeout_seconds=self.AIRCRACK_TIMEOUT_SECONDS,
+                        )
                     )
-                )
+                else:
+                    stages.append(
+                        AttackStage(
+                            mode=AttackMode.DICTIONARY,
+                            dictionary_path=dict_path,
+                            timeout_seconds=self.DEFAULT_TIMEOUTS[AttackMode.DICTIONARY],
+                        )
+                    )
 
         # --- Etapa 2: Dictionary + rules ---
         if AttackMode.RULE_BASED not in skip:
@@ -167,6 +188,8 @@ class CrackingPlanner:
             job_id=job_id,
             artifact_id=artifact_id,
             hash_file_path=hash_file_path,
+            cap_file_path=cap_file_path,
+            bssid=bssid,
             hash_mode=hash_mode,
             stages=stages,
             max_total_time=max_total_time,
@@ -196,7 +219,6 @@ class CrackingPlanner:
             hash_file_path=hash_file_path,
             **kwargs,
         )
-
         # Personalizar según nombre de red.
         if essid:
             essid_upper = essid.upper()
@@ -223,6 +245,18 @@ class CrackingPlanner:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _aircrack_ready(self, cap_file_path: str | None, bssid: str | None) -> bool:
+        """Indica si aircrack-ng puede usarse para la etapa de diccionario.
+
+        Se requiere el binario instalado, un archivo .cap existente y el
+        BSSID del AP objetivo. Si falta cualquiera, se recurre a hashcat.
+        """
+        if not cap_file_path or not bssid:
+            return False
+        if shutil.which("aircrack-ng") is None:
+            return False
+        return Path(cap_file_path).is_file()
 
     def _pick_preferred_dict(
         self,
