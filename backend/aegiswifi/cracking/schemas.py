@@ -269,3 +269,4 @@ class CrackingJobRead(BaseModel):
     recovered: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    error_message: str | None = None

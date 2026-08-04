@@ -315,6 +315,7 @@ class CrackingJob(TimestampMixin, Base):
     recovered: Mapped[bool] = mapped_column(Boolean, default=False)
     encrypted_secret: Mapped[str | None] = mapped_column(Text)  # Fernet token
     restore_path: Mapped[str | None] = mapped_column(String(512))
+    error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

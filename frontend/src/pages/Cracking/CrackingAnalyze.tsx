@@ -13,6 +13,7 @@ export function CrackingAnalyze() {
   const [dictionaries, setDictionaries] = useState<DictionaryInfo[]>([])
   const [rules, setRules] = useState<RuleInfo[]>([])
   const [selectedDictionary, setSelectedDictionary] = useState('')
+  const [customDictPath, setCustomDictPath] = useState('')
   const [selectedRule, setSelectedRule] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -49,8 +50,9 @@ export function CrackingAnalyze() {
       setError('Selecciona el engagement autorizado')
       return
     }
-    if (!selectedDictionary) {
-      setError('Selecciona un diccionario descomprimido')
+    const dictPath = customDictPath.trim() || selectedDictionary
+    if (!dictPath) {
+      setError('Selecciona un diccionario o escribe la ruta de uno personalizado')
       return
     }
     setCreating(true)
@@ -60,7 +62,7 @@ export function CrackingAnalyze() {
       await crackingApi.startJob(
         job.id,
         selectedEng,
-        [selectedDictionary],
+        [dictPath],
         selectedRule ? [selectedRule] : undefined,
       )
       navigate('/cracking/' + job.id)
@@ -141,6 +143,20 @@ export function CrackingAnalyze() {
               <option key={dictionary.path} value={dictionary.path}>{dictionary.name}</option>
             ))}
           </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Ruta de diccionario personalizada (opcional)</label>
+          <input
+            className="form-input"
+            type="text"
+            value={customDictPath}
+            onChange={e => setCustomDictPath(e.target.value)}
+            placeholder={'/usr/share/wordlists/rockyou.txt o cualquier otra wordlist'}
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          />
+          <div className="subtitle" style={{ marginTop: 4 }}>
+            Se usa en lugar de la selección anterior si está completa.
+          </div>
         </div>
         <div className="form-group">
           <label className="form-label">Regla opcional</label>

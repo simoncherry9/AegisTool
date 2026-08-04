@@ -6,6 +6,7 @@ antes que lentas: diccionario → reglas → combinator → máscara → fuerza 
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from aegiswifi.cracking.dictionary import DictionaryManager
@@ -230,15 +231,16 @@ class CrackingPlanner:
     ) -> str | None:
         """Elige la mejor wordlist disponible.
 
-        Prioriza preferidas del usuario, luego rockyou, luego la primera.
+        Prioriza preferidas del usuario — incluso rutas arbitrarias que no
+        están en el inventario —, luego rockyou, luego la primera.
         """
+        for path in preferred or []:
+            resolved = self._resolve_user_wordlist(path)
+            if resolved:
+                return resolved
+
         if not available:
             return None
-
-        preferred_set = set(preferred or [])
-        for info in available:
-            if info.path in preferred_set:
-                return info.path
 
         # rockyou es la preferida por defecto.
         for info in available:
@@ -247,19 +249,39 @@ class CrackingPlanner:
 
         return available[0].path
 
+    def _resolve_user_wordlist(self, path: str) -> str | None:
+        """Devuelve una ruta de wordlist usable desde un path del usuario.
+
+        Acepta rutas del inventario escaneado o cualquier archivo de texto
+        existente en disco (no comprimido). Devuelve ``None`` si no existe o
+        no es utilizable.
+        """
+        candidate = self._dicts.get(path)
+        if candidate is not None:
+            if candidate.compressed:
+                return None
+            return candidate.path
+
+        p = Path(path)
+        if not p.is_file():
+            return None
+        if p.suffix.lower() in DictionaryManager.COMPRESSED_EXTENSIONS:
+            return None
+        return str(p.resolve())
+
     def _pick_preferred_rule(
         self,
         available: list[RuleInfo],
         preferred: list[str] | None = None,
     ) -> str | None:
         """Elige el mejor archivo de reglas disponible."""
+        for path in preferred or []:
+            resolved = self._resolve_user_rule(path)
+            if resolved:
+                return resolved
+
         if not available:
             return None
-
-        preferred_set = set(preferred or [])
-        for info in available:
-            if info.path in preferred_set:
-                return info.path
 
         # best64.rule es la regla más común.
         for info in available:
@@ -267,3 +289,14 @@ class CrackingPlanner:
                 return info.path
 
         return available[0].path
+
+    def _resolve_user_rule(self, path: str) -> str | None:
+        """Devuelve una ruta de reglas usable desde un path del usuario."""
+        candidate = self._rules.get(path)
+        if candidate is not None:
+            return candidate.path
+
+        p = Path(path)
+        if not p.is_file():
+            return None
+        return str(p.resolve())

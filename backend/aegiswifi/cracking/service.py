@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -62,7 +63,7 @@ class CrackingService:
 
         Raises:
             ValueError: Si el handshake no está validado o su calidad es
-                insuficiente.
+                insuficiente, o el archivo .22000 no existe / está vacío.
         """
         if not artifact.validated:
             raise ValueError(f"HandshakeArtifact #{artifact.id} no está validado")
@@ -73,6 +74,20 @@ class CrackingService:
             )
         if not artifact.hash22000_path:
             raise ValueError(f"HandshakeArtifact #{artifact.id} no tiene archivo .22000")
+
+        # Un .22000 vacío hace que hashcat termine al instante con error y se
+        # reporte erróneamente como "exhausted" (minuta §18).
+        path = Path(artifact.hash22000_path)
+        if not path.is_file():
+            raise ValueError(
+                f"HandshakeArtifact #{artifact.id}: el archivo .22000 no existe: "
+                f"{artifact.hash22000_path}"
+            )
+        if path.stat().st_size == 0:
+            raise ValueError(
+                f"HandshakeArtifact #{artifact.id}: el archivo .22000 está vacío; "
+                "reconvierte el handshake con hcxpcapngtool"
+            )
 
     # ------------------------------------------------------------------
     # Ejecución de plan
@@ -168,6 +183,24 @@ class CrackingService:
                     {"options": options, "timeout_seconds": stage_timeout}
                 )
                 collected = await adapter.collect_results()
+
+                # Error real de hashcat (exit != 0/1): no confundir con "exhausted".
+                if collected.get("error"):
+                    error_message = collected.get("error_message") or (
+                        f"hashcat terminó con error (exit {collected.get('exit_code')})"
+                    )
+                    result.exit_code = collected.get("exit_code")
+                    job.status = CrackJobStatus.FAILED.value
+                    job.error_message = error_message[:2000]
+                    job.finished_at = datetime.now(UTC)
+                    session.commit()
+                    self._emit_event(
+                        "cracking_failed",
+                        job.id,
+                        engagement_id,
+                        {"mode": stage.mode.value, "error": error_message[:500]},
+                    )
+                    return result
             except TimeoutError:
                 await adapter.cleanup()
                 if time.monotonic() - plan_started >= plan.max_total_time:
@@ -224,6 +257,10 @@ class CrackingService:
 
         # Todas las etapas agotadas.
         job.finished_at = datetime.now(UTC)
+        job.error_message = (
+            "El keyspace se agotó sin recuperar la contraseña. "
+            "Prueba con otra wordlist, reglas o un ataque por máscara."
+        )
         self._transition_job(session, job.id, CrackJobStatus.EXHAUSTED)
         session.commit()
 

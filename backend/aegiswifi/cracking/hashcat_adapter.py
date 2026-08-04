@@ -274,6 +274,14 @@ class HashcatAdapter(ToolAdapter):
 
         Si hashcat recuperó al menos un hash, ejecuta ``--show`` para
         obtener la contraseña en texto plano.
+
+        Hashcat devuelve los siguientes códigos de salida:
+          - ``0``: se recuperó al menos un hash.
+          - ``1``: keyspace agotado sin éxito (exhausted).
+          - cualquier otro (``-1``, ``255``, …): error real de hashcat
+            (sin hashes cargados, dispositivo OpenCL inválido, wordlist
+            ilegible, etc.). Esos errores NO deben reportarse como
+            "exhausted": se propagan con ``error``/``error_message``.
         """
         raw = self._raw_result
         exit_code = raw.get("exit_code")
@@ -289,16 +297,47 @@ class HashcatAdapter(ToolAdapter):
 
         cracked = password is not None
 
+        error = exit_code not in (0, 1)
+        error_message = self._extract_error_message(exit_code) if error else None
+
         return {
             "cracked": cracked,
             "password": password,
             "exit_code": exit_code,
+            "error": error,
+            "error_message": error_message,
             "peak_speed": max((p.speed for p in self._progress), default=0),
             "stages_executed": 1,
             "total_runtime_seconds": raw.get("runtime_seconds"),
             "log_path": raw.get("log_path"),
             "sha256": raw.get("sha256"),
         }
+
+    def _extract_error_message(self, exit_code: int | None) -> str:
+        """Devuelve un mensaje legible cuando hashcat termina con error.
+
+        Lee las últimas líneas del log para rescatar el motivo real
+        (p. ej. "No hashes loaded", "CL_DEVICE_NOT_FOUND"). Si no hay log,
+        se devuelve el código de salida.
+        """
+        log_path = self._raw_result.get("log_path")
+        if log_path:
+            try:
+                lines = Path(log_path).read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                lines = []
+            interesting = [
+                line.strip()
+                for line in lines
+                if line.strip()
+                and not line.strip().startswith("{")  # líneas JSON de status
+                and not any(line.startswith(prefix) for prefix in _HASHCAT_LOG_PREFIXES)
+            ]
+            if interesting:
+                return " | ".join(interesting[-3:])
+        return f"hashcat terminó con código de salida {exit_code}"
 
     def _extract_password_file(self) -> str | None:
         """Lee la primera contraseña recuperada sin incluirla en logs."""

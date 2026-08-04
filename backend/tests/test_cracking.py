@@ -482,6 +482,46 @@ class TestCrackingPlanner:
             assert wordlist_stage.dictionary_path is not None
             assert "rockyou" not in wordlist_stage.dictionary_path
 
+    def test_build_plan_accepts_arbitrary_dict_path(self, tmp_path):
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        outside = tmp_path / "mi_diccionario_custom.txt"
+        outside.write_text("clave1\nclave2\n")
+        # El diccionario NO está en el directorio escaneado por el manager.
+        scanned_dir = tmp_path / "scanned"
+        scanned_dir.mkdir(exist_ok=True)
+        (scanned_dir / "rockyou.txt").write_text("x\ny\n")
+        dm = self._make_manager_with_dicts(scanned_dir, ["rockyou.txt"])
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        plan = planner.build_plan(
+            job_id=1,
+            artifact_id=1,
+            hash_file_path="/tmp/h.22000",
+            preferred_dicts=[str(outside)],
+        )
+
+        assert plan.stages
+        first = plan.stages[0]
+        assert first.mode == AttackMode.DICTIONARY
+        assert first.dictionary_path == str(outside.resolve())
+
+    def test_pick_preferred_dict_ignores_compressed_arbitrary(self, tmp_path):
+        from aegiswifi.cracking.planner import CrackingPlanner
+
+        compressed = tmp_path / "rockyou.txt.gz"
+        compressed.write_text("x\n")
+        scanned_dir = tmp_path / "scanned"
+        scanned_dir.mkdir(exist_ok=True)
+        (scanned_dir / "rockyou.txt").write_text("x\n")
+        dm = self._make_manager_with_dicts(scanned_dir, ["rockyou.txt"])
+        rm = self._make_manager_with_rules(tmp_path)
+        planner = CrackingPlanner(dm, rm)
+
+        resolved = planner._resolve_user_wordlist(str(compressed))
+        assert resolved is None
+
     def test_build_plan_no_dicts(self, tmp_path):
         from aegiswifi.cracking.planner import CrackingPlanner
 
@@ -555,7 +595,7 @@ class TestCrackingPlanner:
 
 class TestCrackingService:
     @staticmethod
-    def _authorized_job(db_session):
+    def _authorized_job(db_session, tmp_path):
         engagement = Engagement(
             code="ENG-CRACK-001",
             name="Cracking test",
@@ -577,11 +617,13 @@ class TestCrackingService:
         )
         db_session.add(capture)
         db_session.flush()
+        hash_file = tmp_path / "h.22000"
+        hash_file.write_text("WPA*01*deadbeef*00:11:22:33:44:55*test*\n")
         artifact = HandshakeArtifact(
             capture_id=capture.id,
             validated=True,
             quality=HandshakeQuality.GOOD,
-            hash22000_path="/tmp/h.22000",
+            hash22000_path=str(hash_file),
         )
         db_session.add(artifact)
         db_session.flush()
@@ -594,19 +636,57 @@ class TestCrackingService:
         db_session.commit()
         return engagement, artifact, job
 
-    def test_validate_artifact_valid(self, db_session):
+    def test_validate_artifact_valid(self, db_session, tmp_path):
         from aegiswifi.cracking.service import CrackingService
+
+        hash_file = tmp_path / "test.22000"
+        hash_file.write_text("WPA*01*deadbeef*00:11:22:33:44:55*test*\n")
 
         artifact = HandshakeArtifact(
             validated=True,
             quality=HandshakeQuality.GOOD,
-            hash22000_path="/tmp/test.22000",
+            hash22000_path=str(hash_file),
         )
         db_session.add(artifact)
         db_session.commit()
 
         service = CrackingService()
         service.validate_artifact(artifact)
+
+    def test_validate_artifact_missing_hashfile(self, db_session, tmp_path):
+        from aegiswifi.cracking.service import CrackingService
+
+        missing = str(tmp_path / "no_existe.22000")
+
+        artifact = HandshakeArtifact(
+            validated=True,
+            quality=HandshakeQuality.GOOD,
+            hash22000_path=missing,
+        )
+        db_session.add(artifact)
+        db_session.commit()
+
+        service = CrackingService()
+        with pytest.raises(ValueError, match="no existe"):
+            service.validate_artifact(artifact)
+
+    def test_validate_artifact_empty_hashfile(self, db_session, tmp_path):
+        from aegiswifi.cracking.service import CrackingService
+
+        hash_file = tmp_path / "vacio.22000"
+        hash_file.write_text("")
+
+        artifact = HandshakeArtifact(
+            validated=True,
+            quality=HandshakeQuality.GOOD,
+            hash22000_path=str(hash_file),
+        )
+        db_session.add(artifact)
+        db_session.commit()
+
+        service = CrackingService()
+        with pytest.raises(ValueError, match="vacío"):
+            service.validate_artifact(artifact)
 
     def test_validate_artifact_not_validated(self):
         from aegiswifi.cracking.service import CrackingService
@@ -720,10 +800,10 @@ class TestCrackingService:
 
         assert [job.id for job in filtered] == [jobs[0].id]
 
-    def test_cancel_job_created(self, db_session):
+    def test_cancel_job_created(self, db_session, tmp_path):
         from aegiswifi.cracking.service import CrackingService
 
-        engagement, artifact, job = self._authorized_job(db_session)
+        engagement, artifact, job = self._authorized_job(db_session, tmp_path)
 
         service = CrackingService(event_bus=MagicMock())
         cancelled = service.cancel_job(db_session, job.id)
@@ -782,11 +862,11 @@ class TestCrackingService:
         assert service.get_hash_info(artifact) is None
 
     @pytest.mark.asyncio
-    async def test_execute_plan_success(self, db_session):
+    async def test_execute_plan_success(self, db_session, tmp_path):
         """Ejecución de plan: adaptador reporta cracked."""
         from aegiswifi.cracking.service import CrackingService
 
-        engagement, artifact, job = self._authorized_job(db_session)
+        engagement, artifact, job = self._authorized_job(db_session, tmp_path)
 
         plan = CrackingPlan(
             job_id=job.id,
@@ -823,11 +903,11 @@ class TestCrackingService:
         assert job.recovered is True
 
     @pytest.mark.asyncio
-    async def test_execute_plan_exhausted(self, db_session):
+    async def test_execute_plan_exhausted(self, db_session, tmp_path):
         """Ejecución de plan donde no se crackea la clave."""
         from aegiswifi.cracking.service import CrackingService
 
-        engagement, artifact, job = self._authorized_job(db_session)
+        engagement, artifact, job = self._authorized_job(db_session, tmp_path)
 
         plan = CrackingPlan(
             job_id=job.id,
@@ -860,6 +940,47 @@ class TestCrackingService:
 
         db_session.refresh(job)
         assert job.recovered is False
+
+    @pytest.mark.asyncio
+    async def test_execute_plan_error_marks_failed_not_exhausted(self, db_session, tmp_path):
+        """Un error real de hashcat (exit != 0/1) debe marcar FAILED, no EXHAUSTED."""
+        from aegiswifi.cracking.service import CrackingService
+
+        engagement, artifact, job = self._authorized_job(db_session, tmp_path)
+
+        plan = CrackingPlan(
+            job_id=job.id,
+            artifact_id=artifact.id,
+            hash_file_path=artifact.hash22000_path or "",
+            stages=[AttackStage(mode=AttackMode.DICTIONARY, dictionary_path="/dicts/rockyou.txt")],
+        )
+
+        mock_adapter = AsyncMock()
+        mock_adapter.start = AsyncMock(return_value={"exit_code": 255})
+        mock_adapter.collect_results = AsyncMock(
+            return_value={
+                "cracked": False,
+                "password": None,
+                "exit_code": 255,
+                "error": True,
+                "error_message": "No hashes loaded.",
+                "peak_speed": 0,
+            }
+        )
+
+        service = CrackingService(event_bus=MagicMock())
+
+        with patch("aegiswifi.cracking.service.get_adapter", return_value=mock_adapter):
+            result = await service._execute_with_session(
+                plan, engagement_id=engagement.id, session=db_session
+            )
+
+        assert result.cracked is False
+        assert result.exit_code == 255
+
+        db_session.refresh(job)
+        assert job.status == CrackJobStatus.FAILED.value
+        assert "No hashes loaded" in (job.error_message or "")
 
 
 # ===================================================================
@@ -1045,6 +1166,46 @@ class TestHashcatAdapter:
         result = await adapter.collect_results()
         assert result["cracked"] is False
         assert result["password"] is None
+
+    @pytest.mark.asyncio
+    async def test_collect_results_error_exit_not_exhausted(self):
+        """Exit code -1/255 (error hashcat) no debe reportarse como exhausted."""
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 255, "log_path": None}
+        adapter._cracked_password = None
+
+        result = await adapter.collect_results()
+        assert result["cracked"] is False
+        assert result["error"] is True
+        assert "código de salida 255" in result["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_collect_results_exhausted_exit_code_is_not_error(self):
+        """Exit code 1 = keyspace agotado, no es un error."""
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 1, "log_path": None}
+        adapter._cracked_password = None
+
+        result = await adapter.collect_results()
+        assert result["cracked"] is False
+        assert result["error"] is False
+
+    @pytest.mark.asyncio
+    async def test_extract_error_message_reads_log_tail(self, tmp_path):
+        log = tmp_path / "hashcat.log"
+        log.write_text(
+            '{"status":"Running"}\n'
+            "Session.Name: aegis\n"
+            "No hashes loaded.\n"
+            "Something broke here\n"
+        )
+        adapter = self._make_adapter()
+        adapter._raw_result = {"exit_code": 255, "log_path": str(log)}
+        adapter._cracked_password = None
+
+        result = await adapter.collect_results()
+        assert result["error"] is True
+        assert "No hashes loaded." in result["error_message"]
 
 
 # ===================================================================

@@ -15,6 +15,8 @@ Endpoints:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -40,6 +42,25 @@ router = APIRouter(prefix="/cracking", tags=["cracking"])
 _dict_manager = DictionaryManager()
 _rules_manager = RulesManager()
 _planner = CrackingPlanner(_dict_manager, _rules_manager)
+
+
+def _validate_preferred_paths(paths: list[str] | None, kind: str) -> list[str]:
+    """Devuelve warnings para paths preferidos inexistentes o inválidos.
+
+    Se permite cualquier ruta que exista en disco; si no existe o es un
+    directorio, se informa al usuario para que la corrija.
+    """
+    if not paths:
+        return []
+
+    warnings: list[str] = []
+    for path in paths:
+        candidate = Path(path)
+        if not candidate.exists():
+            warnings.append(f"El {kind} no existe: {path}")
+        elif not candidate.is_file():
+            warnings.append(f"El {kind} no es un archivo válido: {path}")
+    return warnings
 
 
 # ===================================================================
@@ -165,6 +186,9 @@ def analyze_handshake(
 
     hash_info = service.get_hash_info(artifact)
 
+    warnings.extend(_validate_preferred_paths(preferred_dicts, "diccionario"))
+    warnings.extend(_validate_preferred_paths(preferred_rules, "regla"))
+
     plan = _planner.build_plan(
         job_id=0,  # se asigna al crear el job
         artifact_id=artifact_id,
@@ -280,6 +304,15 @@ async def start_cracking_job(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
+
+    invalid = _validate_preferred_paths(preferred_dicts, "diccionario") + _validate_preferred_paths(
+        preferred_rules, "regla"
+    )
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(invalid),
+        )
 
     plan = _planner.build_plan(
         job_id=job_id,

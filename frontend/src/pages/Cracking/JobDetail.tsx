@@ -121,6 +121,12 @@ export function JobDetail() {
         </div>
       )}
 
+      {(job.status === 'FAILED' || job.status === 'EXHAUSTED') && job.error_message && (
+        <div className="callout callout-error" style={{ marginBottom: 24 }}>
+          <strong>Motivo:</strong> {job.error_message}
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="detail-grid">
           <div className="detail-field">

@@ -27,6 +27,7 @@ export interface CrackingJob {
   keyspace: number | null
   started_at: string | null
   finished_at: string | null
+  error_message: string | null
 }
 
 export interface AnalyzePlan {
