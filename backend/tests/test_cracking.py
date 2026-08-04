@@ -34,8 +34,10 @@ from aegiswifi.database.models import (
     CrackJobStatus,
     CrackingJob,
     Engagement,
+    EngagementStatus,
     HandshakeArtifact,
     HandshakeQuality,
+    ScopeTarget,
 )
 
 
@@ -552,6 +554,46 @@ class TestCrackingPlanner:
 
 
 class TestCrackingService:
+    @staticmethod
+    def _authorized_job(db_session):
+        engagement = Engagement(
+            code="ENG-CRACK-001",
+            name="Cracking test",
+            client="Test",
+            operator="tester",
+            status=EngagementStatus.ACTIVE,
+            permissions={"password_audit": True},
+            limits={},
+        )
+        db_session.add(engagement)
+        db_session.flush()
+        db_session.add(
+            ScopeTarget(engagement_id=engagement.id, bssid="AA:BB:CC:DD:EE:FF")
+        )
+        capture = Capture(
+            engagement_id=engagement.id,
+            path="/tmp/capture.cap",
+            bssid="AA:BB:CC:DD:EE:FF",
+        )
+        db_session.add(capture)
+        db_session.flush()
+        artifact = HandshakeArtifact(
+            capture_id=capture.id,
+            validated=True,
+            quality=HandshakeQuality.GOOD,
+            hash22000_path="/tmp/h.22000",
+        )
+        db_session.add(artifact)
+        db_session.flush()
+        job = CrackingJob(
+            artifact_id=artifact.id,
+            strategy="dictionary",
+            status=CrackJobStatus.CREATED,
+        )
+        db_session.add(job)
+        db_session.commit()
+        return engagement, artifact, job
+
     def test_validate_artifact_valid(self, db_session):
         from aegiswifi.cracking.service import CrackingService
 
@@ -681,9 +723,7 @@ class TestCrackingService:
     def test_cancel_job_created(self, db_session):
         from aegiswifi.cracking.service import CrackingService
 
-        job = CrackingJob(strategy="dictionary", status=CrackJobStatus.CREATED)
-        db_session.add(job)
-        db_session.commit()
+        engagement, artifact, job = self._authorized_job(db_session)
 
         service = CrackingService(event_bus=MagicMock())
         cancelled = service.cancel_job(db_session, job.id)
@@ -746,13 +786,11 @@ class TestCrackingService:
         """Ejecución de plan: adaptador reporta cracked."""
         from aegiswifi.cracking.service import CrackingService
 
-        job = CrackingJob(strategy="dictionary", status=CrackJobStatus.CREATED)
-        db_session.add(job)
-        db_session.commit()
+        engagement, artifact, job = self._authorized_job(db_session)
 
         plan = CrackingPlan(
             job_id=job.id,
-            artifact_id=1,
+            artifact_id=artifact.id,
             hash_file_path="/tmp/h.22000",
             stages=[AttackStage(mode=AttackMode.DICTIONARY, dictionary_path="/dicts/rockyou.txt")],
         )
@@ -772,7 +810,9 @@ class TestCrackingService:
         service = CrackingService(event_bus=MagicMock())
 
         with patch("aegiswifi.cracking.service.get_adapter", return_value=mock_adapter):
-            result = await service._execute_with_session(plan, engagement_id=1, session=db_session)
+            result = await service._execute_with_session(
+                plan, engagement_id=engagement.id, session=db_session
+            )
 
         assert result.cracked is True
         assert result.password == "secret123"
@@ -785,15 +825,13 @@ class TestCrackingService:
     @pytest.mark.asyncio
     async def test_execute_plan_exhausted(self, db_session):
         """Ejecución de plan donde no se crackea la clave."""
-        from aegiswifi.cracking.service import CrackingService, get_cracking_service
+        from aegiswifi.cracking.service import CrackingService
 
-        job = CrackingJob(strategy="dictionary", status=CrackJobStatus.CREATED)
-        db_session.add(job)
-        db_session.commit()
+        engagement, artifact, job = self._authorized_job(db_session)
 
         plan = CrackingPlan(
             job_id=job.id,
-            artifact_id=1,
+            artifact_id=artifact.id,
             hash_file_path="/tmp/h.22000",
             stages=[AttackStage(mode=AttackMode.DICTIONARY, dictionary_path="/dicts/rockyou.txt")],
         )
@@ -812,7 +850,9 @@ class TestCrackingService:
         service = CrackingService(event_bus=MagicMock())
 
         with patch("aegiswifi.cracking.service.get_adapter", return_value=mock_adapter):
-            result = await service._execute_with_session(plan, engagement_id=1, session=db_session)
+            result = await service._execute_with_session(
+                plan, engagement_id=engagement.id, session=db_session
+            )
 
         assert result.cracked is False
         assert result.password is None

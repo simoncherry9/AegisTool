@@ -23,6 +23,7 @@ class CaptureStatus(str, enum.Enum):
 class HandshakeCaptureRequest(BaseModel):
     """Solicitud para iniciar captura dirigida de handshake EAPOL."""
 
+    engagement_id: int = Field(..., ge=1, description="Engagement activo que autoriza la captura")
     interface: str = Field(..., description="Interfaz en modo monitor")
     bssid: str = Field(..., description="BSSID del AP objetivo")
     channel: int | None = Field(None, ge=1, le=196, description="Canal del AP")
@@ -37,6 +38,7 @@ class HandshakeCaptureStatusRead(BaseModel):
     """Estado actual de una captura de handshake."""
 
     id: str
+    engagement_id: int
     status: CaptureStatus
     interface: str
     bssid: str

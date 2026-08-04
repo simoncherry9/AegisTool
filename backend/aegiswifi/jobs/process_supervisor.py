@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from contextlib import suppress
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +34,14 @@ class ProcessSupervisor:
         log_dir: Path,
         event_bus: EventBus,
         max_memory_lines: int = 10000,
+        line_parser: Callable[[str], Awaitable[dict[str, Any] | None]] | None = None,
     ) -> None:
         self._job_id = job_id
         self._engagement_id = engagement_id
         self._log_dir = log_dir
         self._event_bus = event_bus
         self._max_memory_lines = max_memory_lines
+        self._line_parser = line_parser
 
         self._process: asyncio.subprocess.Process | None = None
         self._log_path: Path | None = None
@@ -83,6 +86,10 @@ class ProcessSupervisor:
                     self._log_file.flush()
                     self._sha256.update(line.encode("utf-8") + b"\n")
                     self._line_count += 1
+
+                    if self._line_parser is not None:
+                        with suppress(Exception):
+                            await self._line_parser(line)
 
                     if self._line_count <= self._max_memory_lines:
                         self._emit_log_line(line)

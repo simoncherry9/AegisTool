@@ -19,6 +19,7 @@ export function APDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inScope, setInScope] = useState<boolean>(false)
+  const [activeEngagementId, setActiveEngagementId] = useState<number | null>(null)
   const [currentInterface, setCurrentInterface] = useState<string | null>(null)
 
   // Forms state
@@ -55,6 +56,7 @@ export function APDetail() {
 
         const engagements = await engagementsApi.list().catch(() => [])
         const activeEngagement = engagements.find(e => e.status === 'ACTIVE')
+        setActiveEngagementId(activeEngagement?.id ?? null)
         setInScope(Boolean(activeEngagement) && apData.in_scope)
       } catch (err: any) {
         setError(err.message || 'Error loading AP')
@@ -101,9 +103,11 @@ export function APDetail() {
   const handleCaptureHandshake = async () => {
     if (!ap) return
     if (!currentInterface) return setActionStatus('Error: No hay interfaz disponible')
+    if (!activeEngagementId) return setActionStatus('Error: No hay un engagement activo')
     try {
       setActionStatus('Iniciando captura de Handshake...')
       const res = await handshakeApi.startCapture({
+        engagement_id: activeEngagementId,
         interface: currentInterface,
         bssid: ap.bssid,
         channel: ap.channel,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
-import { crackingApi, type AnalyzePlan } from '../../api/cracking'
+import { crackingApi, type AnalyzePlan, type DictionaryInfo, type RuleInfo } from '../../api/cracking'
 import { engagementsApi, type Engagement } from '../../api/engagements'
 
 export function CrackingAnalyze() {
@@ -10,6 +10,10 @@ export function CrackingAnalyze() {
   const [plan, setPlan] = useState<AnalyzePlan | null>(null)
   const [engagements, setEngagements] = useState<Engagement[]>([])
   const [selectedEng, setSelectedEng] = useState<number | undefined>()
+  const [dictionaries, setDictionaries] = useState<DictionaryInfo[]>([])
+  const [rules, setRules] = useState<RuleInfo[]>([])
+  const [selectedDictionary, setSelectedDictionary] = useState('')
+  const [selectedRule, setSelectedRule] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -17,12 +21,18 @@ export function CrackingAnalyze() {
   useEffect(() => {
     async function load() {
       try {
-        const [p, engs] = await Promise.all([
+        const [p, engs, dicts, availableRules] = await Promise.all([
           crackingApi.analyze(Number(artifactId)),
           engagementsApi.list().catch(() => []),
+          crackingApi.dictionaries(),
+          crackingApi.rules(),
         ])
         setPlan(p)
         setEngagements(engs)
+        setDictionaries(dicts.filter(dictionary => !dictionary.compressed))
+        setRules(availableRules)
+        const rockyou = dicts.find(dictionary => !dictionary.compressed && dictionary.name.toLowerCase().includes('rockyou'))
+        setSelectedDictionary(rockyou?.path ?? dicts.find(dictionary => !dictionary.compressed)?.path ?? '')
         const active = engs.find(e => e.status === 'ACTIVE')
         if (active) setSelectedEng(active.id)
       } catch (e: any) {
@@ -35,10 +45,24 @@ export function CrackingAnalyze() {
   }, [artifactId])
 
   async function handleCreateJob() {
+    if (!selectedEng) {
+      setError('Selecciona el engagement autorizado')
+      return
+    }
+    if (!selectedDictionary) {
+      setError('Selecciona un diccionario descomprimido')
+      return
+    }
     setCreating(true)
     setError(null)
     try {
       const job = await crackingApi.createJob(Number(artifactId), 'dictionary', selectedEng)
+      await crackingApi.startJob(
+        job.id,
+        selectedEng,
+        [selectedDictionary],
+        selectedRule ? [selectedRule] : undefined,
+      )
       navigate('/cracking/' + job.id)
     } catch (e: any) {
       setError(e.message)
@@ -66,7 +90,7 @@ export function CrackingAnalyze() {
         </div>
         <div className="detail-actions">
           <button className="btn btn-primary" disabled={creating} onClick={handleCreateJob}>
-            {creating ? 'Creando...' : 'Crear job y empezar'}
+            {creating ? 'Iniciando...' : 'Crear e iniciar cracking'}
           </button>
         </div>
       </div>
@@ -108,6 +132,25 @@ export function CrackingAnalyze() {
         </select>
       </div>
 
+      <div className="grid grid-2" style={{ maxWidth: 820 }}>
+        <div className="form-group">
+          <label className="form-label">Diccionario</label>
+          <select className="form-select" value={selectedDictionary} onChange={e => setSelectedDictionary(e.target.value)}>
+            <option value="">Seleccionar diccionario</option>
+            {dictionaries.map(dictionary => (
+              <option key={dictionary.path} value={dictionary.path}>{dictionary.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Regla opcional</label>
+          <select className="form-select" value={selectedRule} onChange={e => setSelectedRule(e.target.value)}>
+            <option value="">Sin regla preferida</option>
+            {rules.map(rule => <option key={rule.path} value={rule.path}>{rule.name}</option>)}
+          </select>
+        </div>
+      </div>
+
       {plan.plan.stages?.length > 0 ? (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="card-header"><div className="card-title">Plan de ataque ({plan.plan.stages.length} etapas)</div></div>
@@ -119,10 +162,10 @@ export function CrackingAnalyze() {
                   <tr key={i}>
                     <td>{i + 1}</td>
                     <td><span className="badge">{s.mode}</span></td>
-                    <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{s.dict || '—'}</td>
-                    <td style={{ fontSize: 12 }}>{s.rule || '—'}</td>
-                    <td>{s.priority}</td>
-                    <td style={{ fontSize: 12 }}>{formatTime(s.estimated_time)}</td>
+                    <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{s.dictionary_path || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{s.rules_path || '—'}</td>
+                    <td>{i + 1}</td>
+                    <td style={{ fontSize: 12 }}>{formatTime(s.timeout_seconds ?? 0)}</td>
                   </tr>
                 ))}
               </tbody>

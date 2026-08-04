@@ -7,6 +7,8 @@ monitorea progreso, y persiste resultados.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,6 +32,7 @@ from aegiswifi.database.models import (
     HandshakeQuality,
 )
 from aegiswifi.jobs.event_bus import EventBus, JobEventEnvelope
+from aegiswifi.scope.service import build_policy_engine
 
 
 class CrackingService:
@@ -47,6 +50,8 @@ class CrackingService:
     ) -> None:
         self._bus = event_bus or EventBus()
         self._active_jobs: dict[int, CrackingProgress] = {}
+        self._active_adapters: dict[int, Any] = {}
+        self._tasks: dict[int, asyncio.Task[CrackingResult]] = {}
 
     # ------------------------------------------------------------------
     # Validación de handshakes
@@ -116,6 +121,11 @@ class CrackingService:
 
         # Crear/actualizar CrackingJob.
         job = self._init_job(session, plan, engagement_id)
+        artifact = session.get(HandshakeArtifact, plan.artifact_id)
+        if artifact is None:
+            raise ValueError(f"HandshakeArtifact #{plan.artifact_id} no encontrado")
+        self.validate_artifact(artifact)
+        self.assert_password_audit_allowed(session, artifact, engagement_id)
 
         result = CrackingResult(
             job_id=job.id,
@@ -123,10 +133,19 @@ class CrackingService:
         )
 
         config = get_settings().jobs
+        plan_started = time.monotonic()
 
         for idx, stage in enumerate(plan.stages):
+            remaining = plan.max_total_time - int(time.monotonic() - plan_started)
+            if remaining <= 0:
+                self._transition_job(session, job.id, CrackJobStatus.TIME_LIMIT_REACHED)
+                session.commit()
+                return result
             # Actualizar estado.
             self._transition_job(session, job.id, CrackJobStatus.RUNNING)
+
+            def persist_progress(progress: CrackingProgress) -> None:
+                self._persist_progress(session, job.id, progress)
 
             # Crear adaptador para esta etapa.
             adapter = get_adapter(
@@ -135,19 +154,40 @@ class CrackingService:
                 engagement_id=engagement_id,
                 event_bus=self._bus,
                 config=config,
+                progress_callback=persist_progress,
             )
+            self._active_adapters[job.id] = adapter
 
             # Construir opciones para esta etapa.
             options = self._stage_to_options(stage, plan.hash_file_path, plan.hash_mode)
 
             # Ejecutar.
             try:
-                adapter_result = await adapter.start({"options": options})
+                stage_timeout = min(stage.timeout_seconds or remaining, remaining)
+                await adapter.start(
+                    {"options": options, "timeout_seconds": stage_timeout}
+                )
                 collected = await adapter.collect_results()
+            except TimeoutError:
+                await adapter.cleanup()
+                if time.monotonic() - plan_started >= plan.max_total_time:
+                    self._transition_job(session, job.id, CrackJobStatus.TIME_LIMIT_REACHED)
+                    session.commit()
+                    return result
+                continue
+            except asyncio.CancelledError:
+                await adapter.cleanup()
+                self._transition_job(session, job.id, CrackJobStatus.CANCELLED)
+                session.commit()
+                raise
             except Exception:
+                await adapter.cleanup()
                 self._transition_job(session, job.id, CrackJobStatus.FAILED)
+                session.commit()
                 result.exit_code = -1
                 return result
+            finally:
+                self._active_adapters.pop(job.id, None)
 
             result.stages_executed = idx + 1
             result.exit_code = collected.get("exit_code")
@@ -194,6 +234,49 @@ class CrackingService:
             {"stages_executed": len(plan.stages)},
         )
         return result
+
+    def queue_plan(
+        self,
+        session: Session,
+        plan: CrackingPlan,
+        engagement_id: int,
+    ) -> CrackingJob:
+        """Valida y encola un plan sin mantener abierta la petición HTTP."""
+        job = session.get(CrackingJob, plan.job_id)
+        artifact = session.get(HandshakeArtifact, plan.artifact_id)
+        if job is None or artifact is None:
+            raise ValueError("el trabajo o el handshake ya no existe")
+        if not plan.stages:
+            raise ValueError("el plan no contiene etapas ejecutables")
+        self.validate_artifact(artifact)
+        self.assert_password_audit_allowed(session, artifact, engagement_id)
+        job.status = CrackJobStatus.QUEUED.value
+        session.commit()
+        session.refresh(job)
+
+        task = asyncio.create_task(self.execute_plan(plan, engagement_id=engagement_id))
+        self._tasks[job.id] = task
+        task.add_done_callback(lambda completed, job_id=job.id: self._finish_task(job_id, completed))
+        return job
+
+    def assert_password_audit_allowed(
+        self,
+        session: Session,
+        artifact: HandshakeArtifact,
+        engagement_id: int,
+    ) -> None:
+        """Aplica alcance al objetivo real asociado con el handshake."""
+        capture = artifact.capture
+        if capture is None or capture.engagement_id != engagement_id:
+            raise ValueError("el handshake no pertenece al engagement seleccionado")
+        engine = build_policy_engine(session, engagement_id)
+        engine.assert_allowed(
+            "password_audit",
+            ssid=capture.ssid,
+            bssid=capture.bssid,
+            channel=capture.channel,
+        )
+        engine.assert_within_cracking_budget()
 
     # ------------------------------------------------------------------
     # Operaciones con CrackingJob
@@ -256,6 +339,15 @@ class CrackingService:
             job.finished_at = datetime.now(UTC)
             session.commit()
         return job
+
+    async def cancel_active_job(self, session: Session, job_id: int) -> CrackingJob | None:
+        adapter = self._active_adapters.get(job_id)
+        if adapter is not None:
+            await adapter.cleanup()
+        task = self._tasks.get(job_id)
+        if task is not None and not task.done():
+            task.cancel()
+        return self.cancel_job(session, job_id)
 
     # ------------------------------------------------------------------
     # HashInfo
@@ -388,6 +480,35 @@ class CrackingService:
             data=data,
         )
         self._bus.publish(envelope)
+
+    def _persist_progress(
+        self,
+        session: Session,
+        job_id: int,
+        progress: CrackingProgress,
+    ) -> None:
+        self._active_jobs[job_id] = progress
+        job = session.get(CrackingJob, job_id)
+        if job is not None:
+            job.progress = max(0.0, min(1.0, progress.progress_denom))
+            job.speed = progress.speed
+            session.commit()
+
+    def _finish_task(self, job_id: int, task: asyncio.Task[CrackingResult]) -> None:
+        self._tasks.pop(job_id, None)
+        if task.cancelled() or task.exception() is None:
+            return
+        with get_sessionmaker()() as session:
+            job = session.get(CrackingJob, job_id)
+            if job is not None and job.status not in {
+                CrackJobStatus.RECOVERED.value,
+                CrackJobStatus.EXHAUSTED.value,
+                CrackJobStatus.CANCELLED.value,
+                CrackJobStatus.TIME_LIMIT_REACHED.value,
+            }:
+                job.status = CrackJobStatus.FAILED.value
+                job.finished_at = datetime.now(UTC)
+                session.commit()
 
 
 # Singleton.

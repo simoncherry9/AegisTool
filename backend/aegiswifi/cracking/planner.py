@@ -80,7 +80,10 @@ class CrackingPlanner:
         skip = set(skip_modes or [])
 
         # Escanear wordlists disponibles.
-        dicts = self._dicts.scan_all()
+        # Hashcat recibe únicamente wordlists listas para usar. Los archivos
+        # comprimidos permanecen visibles en Recursos hasta que el operador
+        # los descomprima explícitamente.
+        dicts = [dictionary for dictionary in self._dicts.scan_all() if not dictionary.compressed]
         rules = self._rules.scan_all()
 
         stages: list[AttackStage] = []

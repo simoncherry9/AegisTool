@@ -5,6 +5,8 @@ export interface DictionaryInfo {
   path: string
   size_bytes: number
   line_count: number | null
+  compressed: boolean
+  custom: boolean
 }
 
 export interface RuleInfo {
@@ -31,13 +33,14 @@ export interface AnalyzePlan {
   plan: {
     job_id: number
     artifact_id: number
-    hash_file: string
+    hash_file_path: string
+    max_total_time: number
     stages: Array<{
       mode: string
-      dict: string | null
-      rule: string | null
-      priority: number
-      estimated_time: number
+      dictionary_path: string | null
+      rules_path: string | null
+      mask: string | null
+      timeout_seconds: number | null
     }>
   }
   hash_info: {
@@ -56,6 +59,12 @@ export interface HashInfo {
 
 export const crackingApi = {
   dictionaries: () => api.get<DictionaryInfo[]>('/cracking/dictionaries'),
+  createDictionary: (name: string, words: string[]) =>
+    api.post<DictionaryInfo>('/cracking/dictionaries/custom', { name, words }),
+  decompressDictionary: (path: string) =>
+    api.post<DictionaryInfo>('/cracking/dictionaries/decompress', { path }),
+  deleteDictionary: (name: string) =>
+    api.delete<void>('/cracking/dictionaries/custom/' + encodeURIComponent(name)),
   rules: () => api.get<RuleInfo[]>('/cracking/rules'),
 
   analyze: (artifactId: number, preferredDicts?: string[], preferredRules?: string[]) => {
@@ -78,8 +87,12 @@ export const crackingApi = {
     return api.post<CrackingJob>(url)
   },
 
-  startJob: (jobId: number, engagementId: number) =>
-    api.post<{ job_id: number; result: unknown }>('/cracking/jobs/' + jobId + '/start?engagement_id=' + engagementId),
+  startJob: (jobId: number, engagementId: number, preferredDicts?: string[], preferredRules?: string[]) => {
+    const params = new URLSearchParams({ engagement_id: String(engagementId) })
+    preferredDicts?.forEach(path => params.append('preferred_dicts', path))
+    preferredRules?.forEach(path => params.append('preferred_rules', path))
+    return api.post<{ job_id: number; status: string }>(`/cracking/jobs/${jobId}/start?${params}`)
+  },
   cancelJob: (jobId: number) =>
     api.post<{ status: string }>('/cracking/jobs/' + jobId + '/cancel'),
   hashInfo: (artifactId: number) =>

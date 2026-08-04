@@ -7,8 +7,10 @@ permisos/límites en el engagement. La var. de autorización se registra en
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from aegiswifi.core.exceptions import ValidationFailed
@@ -16,6 +18,8 @@ from aegiswifi.database.models import Engagement, ScopeTarget
 from aegiswifi.engagements.service import get_engagement
 from aegiswifi.scope.parser import parse_scope_file
 from aegiswifi.scope.schemas import ScopeFile
+from aegiswifi.scope.policy import PolicyEngine, ScopeContext
+from aegiswifi.scope.schemas import Limits, Permissions, ScopeBlock
 
 
 def import_scope(
@@ -57,3 +61,56 @@ def import_scope(
     session.commit()
     session.refresh(engagement)
     return engagement, scope_file
+
+
+def build_policy_engine(session: Session, engagement_id: int) -> PolicyEngine:
+    """Construye el guardián de alcance desde el engagement persistido.
+
+    Esta es la entrada compartida por captura y cracking para que ninguna
+    acción activa dependa de validaciones dispersas en handlers HTTP.
+    """
+    from aegiswifi.engagements.service import assert_active_and_not_expired
+
+    engagement = get_engagement(session, engagement_id)
+    assert_active_and_not_expired(engagement)
+    targets = list(
+        session.scalars(
+            select(ScopeTarget).where(ScopeTarget.engagement_id == engagement_id)
+        ).all()
+    )
+    now = datetime.now(UTC)
+
+    def _aware(value: datetime | None, fallback: datetime) -> datetime:
+        if value is None:
+            return fallback
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+    scope = ScopeBlock(
+        allowed_ssids=sorted({target.ssid for target in targets if target.ssid}),
+        allowed_bssids=sorted(
+            {
+                target.bssid
+                for target in targets
+                if target.bssid and target.permission_level != "client"
+            }
+        ),
+        allowed_clients=sorted(
+            {
+                target.bssid
+                for target in targets
+                if target.bssid and target.permission_level == "client"
+            }
+        ),
+        channels=sorted({target.channel for target in targets if target.channel is not None}),
+        bands=sorted({target.band for target in targets if target.band}),
+    )
+    context = ScopeContext(
+        engagement_code=engagement.code,
+        valid_from=_aware(engagement.start_date, now - timedelta(days=36500)),
+        valid_until=_aware(engagement.end_date, now + timedelta(days=36500)),
+        scope=scope,
+        permissions=Permissions.model_validate(engagement.permissions),
+        limits=Limits.model_validate(engagement.limits),
+        operator=engagement.operator,
+    )
+    return PolicyEngine(context)

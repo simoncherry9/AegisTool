@@ -6,7 +6,12 @@ bajo demanda para informar al :class:`CrackingPlanner`.
 
 from __future__ import annotations
 
+import bz2
+import gzip
+import lzma
+import zipfile
 from pathlib import Path
+from typing import BinaryIO
 
 from aegiswifi.cracking.schemas import DictionaryInfo
 
@@ -24,13 +29,26 @@ class DictionaryManager:
     """
 
     # Extensiones consideradas wordlist.
-    WORDLIST_EXTENSIONS = {".txt", ".lst", ".dic", ".wordlist", ".gz", ".7z"}
+    WORDLIST_EXTENSIONS = {
+        ".txt",
+        ".lst",
+        ".dic",
+        ".wordlist",
+        ".gz",
+        ".bz2",
+        ".xz",
+        ".zip",
+        ".7z",
+    }
+    COMPRESSED_EXTENSIONS = {".gz", ".bz2", ".xz", ".zip", ".7z"}
+    MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
     def __init__(self, extra_dirs: list[Path] | None = None) -> None:
+        self._custom_dir = Path("data/wordlists")
         self._dirs: list[Path] = extra_dirs or [
             Path("/usr/share/wordlists"),
             Path("/usr/share/dict"),
-            Path("data/wordlists"),
+            self._custom_dir,
         ]
         self._cache: dict[str, DictionaryInfo] = {}
 
@@ -76,6 +94,8 @@ class DictionaryManager:
                     name=entry.name,
                     size_bytes=entry.stat().st_size,
                     is_sorted="sorted" in entry.name.lower() or "rockyou" in entry.name.lower(),
+                    compressed=entry.suffix.lower() in self.COMPRESSED_EXTENSIONS,
+                    custom=self._is_in_custom_dir(entry),
                 )
                 self._cache[path_str] = info
 
@@ -97,6 +117,8 @@ class DictionaryManager:
             path=str(p.resolve()),
             name=p.name,
             size_bytes=p.stat().st_size,
+            compressed=p.suffix.lower() in self.COMPRESSED_EXTENSIONS,
+            custom=self._is_in_custom_dir(p),
         )
         self._cache[info.path] = info
         return info
@@ -109,19 +131,29 @@ class DictionaryManager:
         if not safe_name or safe_name in {".", ".."}:
             raise ValueError("nombre de diccionario inválido")
 
-        directory = Path("data/wordlists")
+        directory = self._custom_dir
         directory.mkdir(parents=True, exist_ok=True)
         file_path = directory / f"{safe_name}.txt"
         if file_path.exists():
             raise FileExistsError(f"el diccionario '{safe_name}' ya existe")
 
-        normalized = [word.strip() for word in words_list if word.strip()]
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_word in words_list:
+            for candidate in raw_word.splitlines():
+                word = candidate.strip()
+                if word and "\x00" not in word and word not in seen:
+                    seen.add(word)
+                    normalized.append(word)
+        if not normalized:
+            raise ValueError("el diccionario no contiene palabras válidas")
         file_path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
         info = DictionaryInfo(
             path=str(file_path.resolve()),
             name=file_path.name,
             size_bytes=file_path.stat().st_size,
             line_count=len(normalized),
+            custom=True,
         )
         self._cache[info.path] = info
         return info
@@ -131,13 +163,96 @@ class DictionaryManager:
         safe_name = Path(name).name
         if not safe_name.lower().endswith(".txt"):
             safe_name += ".txt"
-        directory = Path("data/wordlists").resolve()
+        directory = self._custom_dir.resolve()
         file_path = (directory / safe_name).resolve()
         if file_path.parent != directory or not file_path.is_file():
             return False
         file_path.unlink()
         self._cache.pop(str(file_path), None)
         return True
+
+    def decompress_wordlist(self, path: str) -> DictionaryInfo:
+        """Descomprime una wordlist indexada hacia el directorio administrado.
+
+        Soporta gzip, bzip2, xz y ZIP sin invocar un shell. El archivo de
+        destino se crea de forma exclusiva y se limita el tamaño expandido
+        para evitar bombas de descompresión.
+        """
+        source = Path(path).resolve()
+        indexed = {Path(item.path).resolve() for item in self.scan_all(force=True)}
+        if source not in indexed or not source.is_file():
+            raise ValueError("el archivo comprimido no pertenece al inventario de diccionarios")
+        extension = source.suffix.lower()
+        if extension not in self.COMPRESSED_EXTENSIONS:
+            raise ValueError("el diccionario seleccionado no está comprimido")
+        if extension == ".7z":
+            raise ValueError("los archivos .7z requieren extracción manual; usa .gz, .bz2, .xz o .zip")
+
+        output_name = source.stem
+        if Path(output_name).suffix.lower() not in {".txt", ".lst", ".dic", ".wordlist"}:
+            output_name += ".txt"
+        self._custom_dir.mkdir(parents=True, exist_ok=True)
+        destination = (self._custom_dir / Path(output_name).name).resolve()
+        if destination.exists():
+            raise FileExistsError(f"el diccionario '{destination.name}' ya existe")
+
+        try:
+            with destination.open("xb") as output:
+                if extension == ".gz":
+                    with gzip.open(source, "rb") as input_stream:
+                        self._copy_bounded(input_stream, output)
+                elif extension == ".bz2":
+                    with bz2.open(source, "rb") as input_stream:
+                        self._copy_bounded(input_stream, output)
+                elif extension == ".xz":
+                    with lzma.open(source, "rb") as input_stream:
+                        self._copy_bounded(input_stream, output)
+                else:
+                    self._extract_zip(source, output)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+
+        info = DictionaryInfo(
+            path=str(destination),
+            name=destination.name,
+            size_bytes=destination.stat().st_size,
+            line_count=self.count_lines(str(destination)),
+            custom=True,
+        )
+        self._cache[info.path] = info
+        return info
+
+    def _extract_zip(self, source: Path, output: BinaryIO) -> None:
+        with zipfile.ZipFile(source) as archive:
+            candidates = [
+                item
+                for item in archive.infolist()
+                if not item.is_dir()
+                and Path(item.filename).suffix.lower() in {".txt", ".lst", ".dic", ".wordlist"}
+            ]
+            if len(candidates) != 1:
+                raise ValueError("el ZIP debe contener exactamente una wordlist de texto")
+            member = candidates[0]
+            if member.file_size > self.MAX_UNCOMPRESSED_BYTES:
+                raise ValueError("el diccionario descomprimido supera el límite de 2 GiB")
+            with archive.open(member) as input_stream:
+                self._copy_bounded(input_stream, output)
+
+    def _copy_bounded(self, source: BinaryIO, destination: BinaryIO) -> None:
+        written = 0
+        while chunk := source.read(1024 * 1024):
+            written += len(chunk)
+            if written > self.MAX_UNCOMPRESSED_BYTES:
+                raise ValueError("el diccionario descomprimido supera el límite de 2 GiB")
+            destination.write(chunk)
+
+    def _is_in_custom_dir(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self._custom_dir.resolve())
+            return True
+        except ValueError:
+            return False
 
     # ------------------------------------------------------------------
     # Conteo de líneas
@@ -158,6 +273,12 @@ class DictionaryManager:
         try:
             if ext == ".gz":
                 return self._count_gz(p)
+            elif ext == ".bz2":
+                with bz2.open(p, "rt", encoding=encoding, errors="replace") as stream:
+                    return sum(1 for _ in stream)
+            elif ext == ".xz":
+                with lzma.open(p, "rt", encoding=encoding, errors="replace") as stream:
+                    return sum(1 for _ in stream)
             elif ext == ".7z":
                 return self._count_7z(p)
             else:
@@ -175,16 +296,8 @@ class DictionaryManager:
 
     def _count_gz(self, path: Path) -> int:
         """Cuenta líneas de un .gz usando ``zcat``."""
-        import subprocess
-
-        result = subprocess.run(
-            ["zcat", str(path)],
-            capture_output=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError("zcat failed")
-        return len(result.stdout.decode("utf-8", errors="replace").splitlines())
+        with gzip.open(path, "rt", encoding="utf-8", errors="replace") as stream:
+            return sum(1 for _ in stream)
 
     def _count_7z(self, path: Path) -> int:
         """Cuenta líneas de un .7z usando ``7z``."""

@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from aegiswifi.adapters.base import ToolAdapter
@@ -46,9 +50,16 @@ class HashcatAdapter(ToolAdapter):
     tool_name = "hashcat"
 
     def __init__(self, **kwargs: Any) -> None:
+        self._progress_callback: Callable[[CrackingProgress], None] | None = kwargs.pop(
+            "progress_callback", None
+        )
         super().__init__(**kwargs)
         self._progress: list[CrackingProgress] = []
         self._cracked_password: str | None = None
+        output = tempfile.NamedTemporaryFile(prefix="aegis_hashcat_", suffix=".out", delete=False)
+        output.close()
+        os.chmod(output.name, 0o600)
+        self._password_output_path = Path(output.name)
 
     # ------------------------------------------------------------------
     # Instalación y versión
@@ -109,6 +120,8 @@ class HashcatAdapter(ToolAdapter):
             "--status-timer=1",
             "--potfile-disable",
             "--logfile-disable",
+            "--outfile",
+            str(self._password_output_path),
             "--outfile-format=2",
         ]
 
@@ -194,38 +207,55 @@ class HashcatAdapter(ToolAdapter):
         except json.JSONDecodeError:
             return None
 
-        status: str = data.get("status", "Unknown")
+        status: str = str(data.get("status_string") or data.get("status", "Unknown"))
         progress = data.get("progress", {})
 
         # Fracción de progreso.
-        guess_base = float(progress.get("guessBase", 0) or 1)
-        guess_mod = float(progress.get("guessMod", 0) or 0)
-        frac = guess_mod / guess_base if guess_base > 0 else 0.0
+        if isinstance(progress, list) and len(progress) >= 2:
+            processed = int(progress[0] or 0)
+            total = int(progress[1] or 0)
+            frac = processed / total if total > 0 else 0.0
+        elif isinstance(progress, dict):
+            guess_base = float(progress.get("guessBase", 0) or 1)
+            guess_mod = float(progress.get("guessMod", 0) or 0)
+            frac = guess_mod / guess_base if guess_base > 0 else 0.0
+            processed = int(progress.get("curHashes", 0) or 0)
+            total = int(progress.get("totalHashes", 0) or 0)
+        else:
+            processed = total = 0
+            frac = 0.0
 
         # Velocidad en H/s.
         raw_speed = data.get("speed", 0)
         if isinstance(raw_speed, (int, float)):
             speed_hs = int(raw_speed)
         else:
-            speed_hs = 0
+            devices = data.get("devices", [])
+            speed_hs = sum(
+                int(device.get("speed", 0) or 0)
+                for device in devices
+                if isinstance(device, dict)
+            )
 
         # Hashes recuperados.
-        recovered_raw = data.get("recovered", 0)
-        recovered = len(recovered_raw) if isinstance(recovered_raw, list) else int(recovered_raw)
+        recovered_raw = data.get("recovered_hashes", data.get("recovered", 0))
+        recovered = int(recovered_raw[0] or 0) if isinstance(recovered_raw, list) else int(recovered_raw)
 
         p = CrackingProgress(
             job_id=self._job_id,
             status=status,
             progress_denom=frac,
             speed=speed_hs,
-            time_estimated=progress.get("estimatedStop", 0),
-            hashes_processed=progress.get("curHashes", 0),
-            hashes_total=progress.get("totalHashes", 0),
+            time_estimated=(progress.get("estimatedStop", 0) if isinstance(progress, dict) else None),
+            hashes_processed=processed,
+            hashes_total=total,
             recovered=recovered,
             rejected=data.get("rejected", 0),
             raw_json=data,
         )
         self._progress.append(p)
+        if self._progress_callback is not None:
+            self._progress_callback(p)
 
         return {
             "event": "status",
@@ -250,11 +280,12 @@ class HashcatAdapter(ToolAdapter):
         cracked = False
         password = self._cracked_password
 
-        # Si no se detectó en vivo, intentar --show.
-        if exit_code == 0 and not password and self._progress:
-            last = self._progress[-1]
-            if last.recovered > 0:
-                password = await self._extract_password()
+        # La salida de candidatos recuperados va a un archivo temporal 0600.
+        # Se lee una vez y se elimina inmediatamente para no persistir secretos.
+        if exit_code == 0 and not password:
+            password = self._extract_password_file()
+
+        self._password_output_path.unlink(missing_ok=True)
 
         cracked = password is not None
 
@@ -269,22 +300,18 @@ class HashcatAdapter(ToolAdapter):
             "sha256": raw.get("sha256"),
         }
 
-    async def _extract_password(self) -> str | None:
-        """Ejecuta ``hashcat --show`` para obtener la contraseña."""
-        proc = await asyncio.create_subprocess_exec(
-            "hashcat",
-            "--show",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        if stdout:
-            text = stdout.decode("utf-8", errors="replace").strip()
-            for line in text.split("\n"):
-                if ":" in line:
-                    return line.split(":", 1)[1].strip()
-                return line.strip()
-        return None
+    def _extract_password_file(self) -> str | None:
+        """Lee la primera contraseña recuperada sin incluirla en logs."""
+        try:
+            with self._password_output_path.open("r", encoding="utf-8", errors="replace") as stream:
+                password = stream.readline().rstrip("\r\n")
+                return password or None
+        except OSError:
+            return None
+
+    async def cleanup(self) -> None:
+        await super().cleanup()
+        self._password_output_path.unlink(missing_ok=True)
 
 
 # --- Registro automático al importar el módulo -----------------------------

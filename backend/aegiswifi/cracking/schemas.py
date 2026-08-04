@@ -203,6 +203,12 @@ class DictionaryInfo(BaseModel):
     description: str | None = None
     """Descripción opcional (provista por el usuario)."""
 
+    compressed: bool = False
+    """Indica que debe descomprimirse antes de utilizarlo con Hashcat."""
+
+    custom: bool = False
+    """Indica que pertenece al directorio administrado por AegisWiFi."""
+
 
 class HashInfo(BaseModel):
     """Metadatos de un hash en formato 22000 listo para crackear."""

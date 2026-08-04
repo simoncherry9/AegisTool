@@ -121,6 +121,7 @@ class ToolAdapter(ABC):
             log_dir=self._config.log_dir,
             event_bus=self._event_bus,
             max_memory_lines=self._config.max_log_lines_memory,
+            line_parser=self.parse_output,
         )
         result = await self._supervisor.run(
             cmd,

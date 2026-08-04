@@ -8,12 +8,16 @@ vía ``aireplay-ng``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import shutil
 import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from structlog import get_logger
 
 from aegiswifi.core.privileged import (
@@ -22,6 +26,7 @@ from aegiswifi.core.privileged import (
     spawn_privileged_process,
 )
 from aegiswifi.handshake.schemas import CaptureStatus, HandshakeCaptureStatusRead
+from aegiswifi.scope.service import build_policy_engine
 
 log = get_logger(__name__)
 
@@ -30,12 +35,14 @@ _captures: dict[str, dict[str, Any]] = {}
 
 
 async def start_capture(
+    engagement_id: int,
     interface: str,
     bssid: str,
     channel: int | None = None,
     duration: int = 120,
     deauth_assisted: bool = False,
     deauth_count: int = 3,
+    db_session: Session | None = None,
 ) -> HandshakeCaptureStatusRead:
     """Inicia una captura dirigida de handshake EAPOL.
 
@@ -44,6 +51,14 @@ async def start_capture(
     3. Monitorea el archivo .cap para detectar EAPOL frames.
     4. Al detectar o expirar, detiene y valida con ``hcxpcapngtool``.
     """
+    if db_session is None:
+        raise ValueError("se requiere una sesión para validar el alcance")
+    engine = build_policy_engine(db_session, engagement_id)
+    engine.assert_allowed("handshake_capture", bssid=bssid, channel=channel)
+    if deauth_assisted:
+        engine.assert_allowed("controlled_reconnect", bssid=bssid, channel=channel)
+        engine.assert_within_frame_budget()
+
     capture_id = str(uuid.uuid4())[:8]
     output_dir = Path(tempfile.mkdtemp(prefix="hs_capture_"))
     output_prefix = str(output_dir / "capture")
@@ -66,6 +81,7 @@ async def start_capture(
     if proc is None:
         entry: dict[str, Any] = {
             "id": capture_id,
+            "engagement_id": engagement_id,
             "status": CaptureStatus.FAILED,
             "interface": interface,
             "bssid": bssid,
@@ -80,6 +96,7 @@ async def start_capture(
 
     entry = {
         "id": capture_id,
+        "engagement_id": engagement_id,
         "status": CaptureStatus.CAPTURING,
         "interface": interface,
         "bssid": bssid,
@@ -193,30 +210,49 @@ async def _monitor_capture(capture_id: str) -> None:
                     "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
                 )
 
-            # Integrar SIEMPRE con ValidationService para que aparezca en el apartado de handshakes (incluso si es inválido)
+            # Persistir siempre el original antes de validar (minuta §15/§17/§30).
             try:
+                from aegiswifi.core.config import get_settings
                 from aegiswifi.database.engine import get_sessionmaker
-                from aegiswifi.database.models import AccessPoint, Engagement, EngagementStatus
+                from aegiswifi.database.models import AccessPoint
                 from aegiswifi.database.models import Capture as DBCapture
                 from aegiswifi.validation.service import get_validation_service
 
                 with get_sessionmaker()() as db_session:
-                    active_eng = (
-                        db_session.query(Engagement)
-                        .filter_by(status=EngagementStatus.ACTIVE.value)
-                        .first()
+                    ap = db_session.scalar(
+                        select(AccessPoint).where(
+                            AccessPoint.engagement_id == entry["engagement_id"],
+                            AccessPoint.bssid == entry["bssid"],
+                        )
                     )
-                    eng_id = active_eng.id if active_eng else 1
-
-                    ap = db_session.query(AccessPoint).filter_by(bssid=entry["bssid"]).first()
-                    ap_id = ap.id if ap else None
+                    evidence_dir = (
+                        get_settings().paths.evidence_dir
+                        / str(entry["engagement_id"])
+                        / "captures"
+                    )
+                    evidence_dir.mkdir(parents=True, exist_ok=True)
+                    evidence_path = evidence_dir / f"handshake_{capture_id}_{uuid.uuid4().hex[:8]}.cap"
+                    sha256 = hashlib.sha256()
+                    size_bytes = 0
+                    with cap_path.open("rb") as source, evidence_path.open("xb") as destination:
+                        while chunk := source.read(1024 * 1024):
+                            sha256.update(chunk)
+                            size_bytes += len(chunk)
+                            destination.write(chunk)
 
                     db_cap = DBCapture(
-                        engagement_id=eng_id,
-                        access_point_id=ap_id,
-                        path=str(cap_path),
+                        engagement_id=entry["engagement_id"],
+                        path=str(evidence_path),
                         category="handshake",
                         format="cap",
+                        sha256=sha256.hexdigest(),
+                        original_filename=cap_path.name,
+                        size_bytes=size_bytes,
+                        interface=entry["interface"],
+                        channel=entry["channel"],
+                        bssid=entry["bssid"],
+                        ssid=ap.ssid if ap else None,
+                        tool="airodump-ng",
                     )
                     db_session.add(db_cap)
                     db_session.commit()
@@ -226,8 +262,16 @@ async def _monitor_capture(capture_id: str) -> None:
                     result = await val_service.validate_capture(
                         capture=db_cap, db_session=db_session, force=True
                     )
+                    entry["pcap_path"] = str(evidence_path)
+                    entry["handshake_detected"] = result.validated
                     if result.artifact_id:
                         entry["artifact_id"] = result.artifact_id
+                    if result.validated:
+                        entry["status"] = CaptureStatus.COMPLETE
+                        entry["hash_path"] = result.hash22000_path
+                    else:
+                        entry["status"] = CaptureStatus.FAILED
+                        entry["error"] = "; ".join(result.errors) or "La captura no contiene un handshake utilizable"
             except Exception as e:
                 log.error("Error al persistir/validar captura en DB", error=str(e))
         elif entry["status"] == CaptureStatus.CAPTURING:
@@ -250,6 +294,9 @@ async def _monitor_capture(capture_id: str) -> None:
                     await proc.wait()
                 except Exception:
                     pass
+        output_dir = entry.get("_output_dir")
+        if output_dir:
+            shutil.rmtree(output_dir, ignore_errors=True)
 
 
 async def _check_handshake(cap_path: str, bssid: str) -> bool:

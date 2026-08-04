@@ -9,7 +9,10 @@ Endpoints:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from aegiswifi.database.engine import get_db
 
 from aegiswifi.handshake import service as handshake_service
 from aegiswifi.handshake.schemas import HandshakeCaptureRequest, HandshakeCaptureStatusRead
@@ -20,15 +23,18 @@ router = APIRouter(prefix="/handshake", tags=["handshake"])
 @router.post("/capture", response_model=HandshakeCaptureStatusRead, status_code=status.HTTP_201_CREATED)
 async def start_handshake_capture(
     req: HandshakeCaptureRequest,
+    db: Session = Depends(get_db),  # noqa: B008
 ) -> HandshakeCaptureStatusRead:
     """Inicia una captura dirigida de handshake EAPOL."""
     return await handshake_service.start_capture(
+        engagement_id=req.engagement_id,
         interface=req.interface,
         bssid=req.bssid,
         channel=req.channel,
         duration=req.duration,
         deauth_assisted=req.deauth_assisted,
         deauth_count=req.deauth_count,
+        db_session=db,
     )
 
 

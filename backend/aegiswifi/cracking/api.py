@@ -16,7 +16,7 @@ Endpoints:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from aegiswifi.cracking.dictionary import DictionaryManager
@@ -26,7 +26,6 @@ from aegiswifi.cracking.schemas import (
     AttackMode,
     CrackingJobRead,
     CrackingPlan,
-    CrackingResult,
     DictionaryInfo,
     HashInfo,
     RuleInfo,
@@ -60,7 +59,7 @@ class StartJobResponse(BaseModel):
     """Respuesta de ``POST /jobs/{job_id}/start``."""
 
     job_id: int
-    result: CrackingResult
+    status: str
 
 
 # ===================================================================
@@ -69,8 +68,12 @@ class StartJobResponse(BaseModel):
 
 
 class CustomWordlistCreate(BaseModel):
-    name: str
-    words: list[str]
+    name: str = Field(min_length=1, max_length=80)
+    words: list[str] = Field(min_length=1, max_length=1_000_000)
+
+
+class DictionaryDecompressRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
 
 
 @router.get("/dictionaries", response_model=list[DictionaryInfo])
@@ -95,6 +98,17 @@ def create_custom_dictionary(body: CustomWordlistCreate) -> DictionaryInfo:
         return _dict_manager.create_custom_wordlist(body.name, body.words)
     except (ValueError, FileExistsError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/dictionaries/decompress", response_model=DictionaryInfo)
+def decompress_dictionary(body: DictionaryDecompressRequest) -> DictionaryInfo:
+    """Descomprime de forma segura una wordlist ya detectada en el sistema."""
+    try:
+        return _dict_manager.decompress_wordlist(body.path)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete("/dictionaries/custom/{name}", status_code=status.HTTP_204_NO_CONTENT)
@@ -276,18 +290,21 @@ async def start_cracking_job(
         preferred_rules=preferred_rules,
     )
 
-    result = await service.execute_plan(plan, engagement_id=engagement_id, session=db)
-    return StartJobResponse(job_id=job_id, result=result)
+    try:
+        queued_job = service.queue_plan(db, plan, engagement_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return StartJobResponse(job_id=job_id, status=queued_job.status)
 
 
 @router.post("/jobs/{job_id}/cancel")
-def cancel_cracking_job(
+async def cancel_cracking_job(
     job_id: int,
     db: Session = Depends(get_db),  # noqa: B008
 ) -> dict[str, str]:
     """Cancela un CrackingJob pendiente o en ejecución."""
     service = get_cracking_service()
-    job = service.cancel_job(db, job_id)
+    job = await service.cancel_active_job(db, job_id)
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
