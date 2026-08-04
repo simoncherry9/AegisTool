@@ -54,8 +54,8 @@ class ScopeContext:
             self.scope.allowed_ssids or self.scope.allowed_bssids or self.scope.allowed_clients
         )
         if allowed_any:
-            # Sin lista explícita → nada está autorizado de forma activa.
-            return False
+            # Sin lista explícita → todo objetivo está permitido.
+            return True
         if ssid and self.scope.allowed_ssids and ssid not in self.scope.allowed_ssids:
             return False
         if bssid and self.scope.allowed_bssids and bssid not in self.scope.allowed_bssids:
