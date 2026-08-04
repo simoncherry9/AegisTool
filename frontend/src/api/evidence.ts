@@ -58,12 +58,10 @@ export const evidenceApi = {
   /** Descargar archivo de evidencia como blob */
   download: (id: number) => {
     const url = '/api/v1/evidence/' + id + '/download'
-    return fetch(url).then(r => {
+    const token = localStorage.getItem('aegis_token')
+    return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} }).then(r => {
       if (!r.ok) throw new Error('Error al descargar: ' + r.status)
       return r.blob()
     })
   },
-
-  /** Eliminar registro de evidencia */
-  delete: (id: number) => api.delete<void>(`/evidence/${id}`),
 }

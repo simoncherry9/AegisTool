@@ -4,7 +4,6 @@ Endpoints:
   GET    /evidence         — listar evidencia con filtros
   GET    /evidence/{id}    — detalle de una evidencia
   GET    /evidence/{id}/download — descargar archivo
-  DELETE /evidence/{id}    — eliminar registro de evidencia
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from aegiswifi.core.exceptions import NotFound
 from aegiswifi.database.engine import get_db
 from aegiswifi.evidence import service as evidence_service
 from aegiswifi.evidence.schemas import CaptureListRead, CaptureRead
@@ -65,12 +63,3 @@ def download_evidence(evidence_id: int, db: Session = Depends(get_db)) -> FileRe
         media_type="application/octet-stream",
         filename=path.name,
     )
-
-
-@router.delete("/{evidence_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_evidence(evidence_id: int, db: Session = Depends(get_db)) -> None:  # noqa: B008
-    """Elimina el registro de evidencia (no el archivo en disco)."""
-    try:
-        evidence_service.delete_evidence(db, evidence_id)
-    except NotFound as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e

@@ -142,7 +142,7 @@ async def get_degraded() -> list[AccessPointDetail]:
 
 
 @router.get("/events")
-async def get_events(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
+async def get_events(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, object]]:
     """Eventos recientes de descubrimiento."""
     return await discovery_service.recent_events(limit)
 

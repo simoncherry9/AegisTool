@@ -6,11 +6,17 @@ antes que lentas: diccionario → reglas → combinator → máscara → fuerza 
 
 from __future__ import annotations
 
-from aegiswifi.cracking.dictionary import DictionaryManager
-from aegiswifi.cracking.rules import RulesManager
 from typing import Any
 
-from aegiswifi.cracking.schemas import AttackMode, AttackStage, CrackingPlan
+from aegiswifi.cracking.dictionary import DictionaryManager
+from aegiswifi.cracking.rules import RulesManager
+from aegiswifi.cracking.schemas import (
+    AttackMode,
+    AttackStage,
+    CrackingPlan,
+    DictionaryInfo,
+    RuleInfo,
+)
 
 
 class CrackingPlanner:
@@ -23,14 +29,14 @@ class CrackingPlanner:
 
     # Tiempos por defecto por etapa (segundos).
     DEFAULT_TIMEOUTS: dict[AttackMode, int] = {
-        AttackMode.DICTIONARY: 300,        # 5 min
-        AttackMode.RULE_BASED: 600,        # 10 min
-        AttackMode.COMBIATOR: 900,         # 15 min
+        AttackMode.DICTIONARY: 300,  # 5 min
+        AttackMode.RULE_BASED: 600,  # 10 min
+        AttackMode.COMBIATOR: 900,  # 15 min
         AttackMode.HYBRID_WORDLIST_MASK: 1200,  # 20 min
         AttackMode.HYBRID_MASK_WORDLIST: 1200,  # 20 min
-        AttackMode.MASK: 1800,             # 30 min
-        AttackMode.PRINCE: 1800,           # 30 min
-        AttackMode.BRUTE_FORCE: 3600,      # 60 min
+        AttackMode.MASK: 1800,  # 30 min
+        AttackMode.PRINCE: 1800,  # 30 min
+        AttackMode.BRUTE_FORCE: 3600,  # 60 min
     }
 
     def __init__(
@@ -216,7 +222,7 @@ class CrackingPlanner:
 
     def _pick_preferred_dict(
         self,
-        available: list,
+        available: list[DictionaryInfo],
         preferred: list[str] | None = None,
     ) -> str | None:
         """Elige la mejor wordlist disponible.
@@ -240,7 +246,7 @@ class CrackingPlanner:
 
     def _pick_preferred_rule(
         self,
-        available: list,
+        available: list[RuleInfo],
         preferred: list[str] | None = None,
     ) -> str | None:
         """Elige el mejor archivo de reglas disponible."""

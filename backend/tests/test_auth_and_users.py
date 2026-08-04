@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
-from aegiswifi.database.models import User, UserRole
+
+from aegiswifi.database.models import UserRole
 from aegiswifi.users import service
-from aegiswifi.users.schemas import UserCreate, UserUpdate
+from aegiswifi.users.schemas import UserCreate
 
 
 def test_user_creation_and_auth(db_session):
@@ -50,7 +53,9 @@ def test_auth_api_endpoints(client, db_session):
     assert admin.username == "admin"
 
     # Login exitoso vía API
-    login_resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    login_resp = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin123"}
+    )
     assert login_resp.status_code == 200
     data = login_resp.json()
     assert "access_token" in data
@@ -80,3 +85,12 @@ def test_auth_api_endpoints(client, db_session):
     list_resp = client.get("/api/v1/users", headers={"Authorization": f"Bearer {token}"})
     assert list_resp.status_code == 200
     assert len(list_resp.json()) >= 2
+
+
+def test_domain_api_requires_auth_when_enabled(client, monkeypatch):
+    settings = SimpleNamespace(security=SimpleNamespace(require_auth=True))
+    monkeypatch.setattr("aegiswifi.api.v1.auth.get_settings", lambda: settings)
+
+    response = client.get("/api/v1/engagements")
+
+    assert response.status_code == 401

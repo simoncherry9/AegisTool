@@ -30,8 +30,10 @@ from aegiswifi.cracking.schemas import (
     RuleInfo,
 )
 from aegiswifi.database.models import (
+    Capture,
     CrackJobStatus,
     CrackingJob,
+    Engagement,
     HandshakeArtifact,
     HandshakeQuality,
 )
@@ -276,6 +278,29 @@ class TestDictionaryManager:
         manager = DictionaryManager(extra_dirs=[])
         assert manager.count_lines("/nonexistent") is None
 
+    def test_create_and_delete_custom_wordlist(self, tmp_path, monkeypatch):
+        from aegiswifi.cracking.dictionary import DictionaryManager
+
+        monkeypatch.chdir(tmp_path)
+        manager = DictionaryManager()
+        info = manager.create_custom_wordlist("clientes", [" alpha ", "", "beta"])
+
+        assert info.name == "clientes.txt"
+        assert info.line_count == 2
+        assert Path(info.path).read_text(encoding="utf-8") == "alpha\nbeta\n"
+        assert manager.delete_custom_wordlist("clientes") is True
+        assert not Path(info.path).exists()
+
+    def test_custom_wordlist_name_cannot_escape_managed_directory(self, tmp_path, monkeypatch):
+        from aegiswifi.cracking.dictionary import DictionaryManager
+
+        monkeypatch.chdir(tmp_path)
+        manager = DictionaryManager()
+        info = manager.create_custom_wordlist("../../outside", ["safe"])
+
+        assert Path(info.path).parent == (tmp_path / "data" / "wordlists").resolve()
+        assert not (tmp_path / "outside.txt").exists()
+
     def test_rockyou_marked_sorted(self, tmp_path):
         from aegiswifi.cracking.dictionary import DictionaryManager
 
@@ -496,10 +521,10 @@ class TestCrackingPlanner:
         planner = CrackingPlanner(dm, rm)
 
         path = planner._pick_preferred_dict(
-            [DictionaryInfo(path="/dicts/other.txt", name="other.txt",
-                            size_bytes=100),
-             DictionaryInfo(path="/dicts/rockyou.txt", name="rockyou.txt",
-                            size_bytes=200)]
+            [
+                DictionaryInfo(path="/dicts/other.txt", name="other.txt", size_bytes=100),
+                DictionaryInfo(path="/dicts/rockyou.txt", name="rockyou.txt", size_bytes=200),
+            ]
         )
         assert path is not None
         assert "rockyou" in path
@@ -512,10 +537,10 @@ class TestCrackingPlanner:
         planner = CrackingPlanner(dm, rm)
 
         path = planner._pick_preferred_rule(
-            [RuleInfo(path="/rules/complex.rule", name="complex.rule",
-                      size_bytes=10),
-             RuleInfo(path="/rules/best64.rule", name="best64.rule",
-                      size_bytes=5)]
+            [
+                RuleInfo(path="/rules/complex.rule", name="complex.rule", size_bytes=10),
+                RuleInfo(path="/rules/best64.rule", name="best64.rule", size_bytes=5),
+            ]
         )
         assert path is not None
         assert "best64" in path
@@ -580,8 +605,9 @@ class TestCrackingService:
     def test_create_cracking_job(self, db_session):
         from aegiswifi.cracking.service import CrackingService
 
-        artifact = HandshakeArtifact(validated=True, quality=HandshakeQuality.GOOD,
-                                      hash22000_path="/tmp/x.22000")
+        artifact = HandshakeArtifact(
+            validated=True, quality=HandshakeQuality.GOOD, hash22000_path="/tmp/x.22000"
+        )
         db_session.add(artifact)
         db_session.commit()
 
@@ -614,15 +640,43 @@ class TestCrackingService:
     def test_list_jobs(self, db_session):
         from aegiswifi.cracking.service import CrackingService
 
-        db_session.add_all([
-            CrackingJob(strategy="a", status=CrackJobStatus.CREATED),
-            CrackingJob(strategy="b", status=CrackJobStatus.RUNNING),
-        ])
+        db_session.add_all(
+            [
+                CrackingJob(strategy="a", status=CrackJobStatus.CREATED),
+                CrackingJob(strategy="b", status=CrackJobStatus.RUNNING),
+            ]
+        )
         db_session.commit()
 
         service = CrackingService()
         jobs = service.list_jobs(db_session)
         assert len(jobs) >= 2
+
+    def test_list_jobs_filters_by_capture_engagement(self, db_session):
+        from aegiswifi.cracking.service import CrackingService
+
+        engagements = [
+            Engagement(code=f"ENG-CRACK-{index}", name="Test", client="Client", operator="Op")
+            for index in (1, 2)
+        ]
+        db_session.add_all(engagements)
+        db_session.flush()
+        captures = [
+            Capture(engagement_id=engagement.id, path=f"/evidence/{engagement.id}.pcap")
+            for engagement in engagements
+        ]
+        db_session.add_all(captures)
+        db_session.flush()
+        artifacts = [HandshakeArtifact(capture_id=capture.id) for capture in captures]
+        db_session.add_all(artifacts)
+        db_session.flush()
+        jobs = [CrackingJob(artifact_id=artifact.id, strategy="dictionary") for artifact in artifacts]
+        db_session.add_all(jobs)
+        db_session.commit()
+
+        filtered = CrackingService().list_jobs(db_session, engagement_id=engagements[0].id)
+
+        assert [job.id for job in filtered] == [jobs[0].id]
 
     def test_cancel_job_created(self, db_session):
         from aegiswifi.cracking.service import CrackingService
@@ -706,19 +760,19 @@ class TestCrackingService:
         # Mockear get_adapter para evitar hashcat real.
         mock_adapter = AsyncMock()
         mock_adapter.start = AsyncMock(return_value={"exit_code": 0, "log_path": "/tmp/log"})
-        mock_adapter.collect_results = AsyncMock(return_value={
-            "cracked": True,
-            "password": "secret123",
-            "exit_code": 0,
-            "peak_speed": 50000,
-        })
+        mock_adapter.collect_results = AsyncMock(
+            return_value={
+                "cracked": True,
+                "password": "secret123",
+                "exit_code": 0,
+                "peak_speed": 50000,
+            }
+        )
 
         service = CrackingService(event_bus=MagicMock())
 
         with patch("aegiswifi.cracking.service.get_adapter", return_value=mock_adapter):
-            result = await service._execute_with_session(
-                plan, engagement_id=1, session=db_session
-            )
+            result = await service._execute_with_session(plan, engagement_id=1, session=db_session)
 
         assert result.cracked is True
         assert result.password == "secret123"
@@ -746,19 +800,19 @@ class TestCrackingService:
 
         mock_adapter = AsyncMock()
         mock_adapter.start = AsyncMock(return_value={"exit_code": 0})
-        mock_adapter.collect_results = AsyncMock(return_value={
-            "cracked": False,
-            "password": None,
-            "exit_code": 0,
-            "peak_speed": 0,
-        })
+        mock_adapter.collect_results = AsyncMock(
+            return_value={
+                "cracked": False,
+                "password": None,
+                "exit_code": 0,
+                "peak_speed": 0,
+            }
+        )
 
         service = CrackingService(event_bus=MagicMock())
 
         with patch("aegiswifi.cracking.service.get_adapter", return_value=mock_adapter):
-            result = await service._execute_with_session(
-                plan, engagement_id=1, session=db_session
-            )
+            result = await service._execute_with_session(plan, engagement_id=1, session=db_session)
 
         assert result.cracked is False
         assert result.password is None
@@ -802,20 +856,24 @@ class TestHashcatAdapter:
     @pytest.mark.asyncio
     async def test_build_command_dictionary(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "dictionary": "/dicts/rockyou.txt",
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "dictionary": "/dicts/rockyou.txt",
+            }
+        )
         assert "/dicts/rockyou.txt" in cmd
 
     @pytest.mark.asyncio
     async def test_build_command_mask(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "attack_mode": AttackMode.MASK,
-            "mask": "?l?l?l?l",
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "attack_mode": AttackMode.MASK,
+                "mask": "?l?l?l?l",
+            }
+        )
         assert "-a" in cmd
         idx = cmd.index("-a")
         assert cmd[idx + 1] == "3"
@@ -824,11 +882,13 @@ class TestHashcatAdapter:
     @pytest.mark.asyncio
     async def test_build_command_with_rules(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "dictionary": "/dicts/rockyou.txt",
-            "rules": "/rules/best64.rule",
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "dictionary": "/dicts/rockyou.txt",
+                "rules": "/rules/best64.rule",
+            }
+        )
         assert "-r" in cmd
         idx = cmd.index("-r")
         assert cmd[idx + 1] == "/rules/best64.rule"
@@ -836,10 +896,12 @@ class TestHashcatAdapter:
     @pytest.mark.asyncio
     async def test_build_command_opencl_device(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "opencl_device": "1",
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "opencl_device": "1",
+            }
+        )
         assert "--opencl-device" in cmd
         idx = cmd.index("--opencl-device")
         assert cmd[idx + 1] == "1"
@@ -847,19 +909,23 @@ class TestHashcatAdapter:
     @pytest.mark.asyncio
     async def test_build_command_extra_args(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "extra_args": ["--slow-candidates", "--optimized-kernel-enable"],
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "extra_args": ["--slow-candidates", "--optimized-kernel-enable"],
+            }
+        )
         assert "--slow-candidates" in cmd
 
     @pytest.mark.asyncio
     async def test_build_command_workload(self):
         adapter = self._make_adapter()
-        cmd = await adapter.build_command({
-            "hash_file": "/tmp/h.22000",
-            "workload_profile": 4,
-        })
+        cmd = await adapter.build_command(
+            {
+                "hash_file": "/tmp/h.22000",
+                "workload_profile": 4,
+            }
+        )
         assert "-w" in cmd
         idx = cmd.index("-w")
         assert cmd[idx + 1] == "4"

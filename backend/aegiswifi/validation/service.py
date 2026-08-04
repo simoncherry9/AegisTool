@@ -14,14 +14,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from aegiswifi.database.models import (
+    AccessPoint,
     Capture,
     HandshakeArtifact,
     HandshakeQuality,
 )
 from aegiswifi.validation.schemas import (
-    EapolAnalysis,
-    PmkidAnalysis,
     QualityClassification,
     ValidationResult,
 )
@@ -103,29 +105,39 @@ class HandshakeValidationService:
         os.close(output_fd)
 
         try:
-            stdout, stderr = await self._run_hcxpcapngtool(
-                str(source_path), output_path
-            )
+            stdout, stderr = await self._run_hcxpcapngtool(str(source_path), output_path)
 
             result.tool_output = (stdout + stderr)[:2000]
 
             if not Path(output_path).is_file() or os.path.getsize(output_path) == 0:
                 # Fallback a aircrack-ng -j si hcxpcapngtool falla
                 from aegiswifi.core.privileged import run_privileged_cmd
+
                 prefix_path = str(source_path).replace(".cap", "").replace(".pcap", "")
-                await run_privileged_cmd(["aircrack-ng", str(source_path), "-j", prefix_path], timeout=15)
-                
+                await run_privileged_cmd(
+                    ["aircrack-ng", str(source_path), "-j", prefix_path], timeout=15
+                )
+
                 # Check possible output files
-                for p in [f"{prefix_path}.hc22000", f"{prefix_path}.hccapx", f"{prefix_path}.22000"]:
+                for p in [
+                    f"{prefix_path}.hc22000",
+                    f"{prefix_path}.hccapx",
+                    f"{prefix_path}.22000",
+                ]:
                     if Path(p).exists() and Path(p).stat().st_size > 0:
                         import shutil
+
                         shutil.copy2(p, output_path)
-                        result.errors.append("hcxpcapngtool falló, pero se recuperó usando aircrack-ng -j")
+                        result.errors.append(
+                            "hcxpcapngtool falló, pero se recuperó usando aircrack-ng -j"
+                        )
                         break
-                        
+
                 if not Path(output_path).is_file() or os.path.getsize(output_path) == 0:
-                    result.errors.append("Ni hcxpcapngtool ni aircrack-ng lograron extraer el handshake (posiblemente incompleto o corrupto).")
-                    
+                    result.errors.append(
+                        "Ni hcxpcapngtool ni aircrack-ng lograron extraer el handshake (posiblemente incompleto o corrupto)."
+                    )
+
                     # Guardar el artifact de todos modos para que el usuario sepa que falló la validación
                     if db_session and capture:
                         artifact = self._persist_artifact(db_session, capture, result, "")
@@ -140,17 +152,13 @@ class HandshakeValidationService:
 
             # Persistir artifact en BD si tenemos sesión y capture.
             if db_session and capture:
-                artifact = self._persist_artifact(
-                    db_session, capture, result, output_path
-                )
+                artifact = self._persist_artifact(db_session, capture, result, output_path)
                 result.artifact_id = artifact.id
 
             return result
 
         except FileNotFoundError:
-            result.errors.append(
-                "hcxpcapngtool no está instalado en el sistema"
-            )
+            result.errors.append("hcxpcapngtool no está instalado en el sistema")
             return result
         except Exception as exc:
             result.errors.append(f"Error durante validación: {exc}")
@@ -164,9 +172,7 @@ class HandshakeValidationService:
     # Análisis del hash 22000
     # ------------------------------------------------------------------
 
-    def _analyze_hashfile(
-        self, hash_path: Path, result: ValidationResult
-    ) -> None:
+    def _analyze_hashfile(self, hash_path: Path, result: ValidationResult) -> None:
         """Analiza el archivo .22000 generado por hcxpcapngtool.
 
         El formato 22000 para WPA es::
@@ -288,13 +294,12 @@ class HandshakeValidationService:
     # Ejecución de hcxpcapngtool
     # ------------------------------------------------------------------
 
-    async def _run_hcxpcapngtool(
-        self, input_path: str, output_path: str
-    ) -> tuple[str, str]:
+    async def _run_hcxpcapngtool(self, input_path: str, output_path: str) -> tuple[str, str]:
         """Ejecuta hcxpcapngtool y retorna (stdout, stderr)."""
         proc = await asyncio.create_subprocess_exec(
             self._tool_path,
-            "-o", output_path,
+            "-o",
+            output_path,
             input_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -338,9 +343,7 @@ class HandshakeValidationService:
     # Persistencia
     # ------------------------------------------------------------------
 
-    def _resolve_source(
-        self, capture: Capture | None, file_path: str | None
-    ) -> str | None:
+    def _resolve_source(self, capture: Capture | None, file_path: str | None) -> str | None:
         """Resuelve la ruta del archivo fuente."""
         if file_path:
             return file_path
@@ -349,24 +352,20 @@ class HandshakeValidationService:
         return None
 
     def _find_existing_artifact(
-        self, capture: Capture, db_session: Any
+        self, capture: Capture, db_session: Session | None
     ) -> HandshakeArtifact | None:
         """Busca un HandshakeArtifact existente para esta captura."""
         if not db_session:
             return None
         try:
-            from sqlalchemy import select
-
-            stmt = select(HandshakeArtifact).where(
-                HandshakeArtifact.capture_id == capture.id
-            )
+            stmt = select(HandshakeArtifact).where(HandshakeArtifact.capture_id == capture.id)
             return db_session.scalars(stmt).first()
         except Exception:
             return None
 
     def _persist_artifact(
         self,
-        db_session: Any,
+        db_session: Session,
         capture: Capture,
         result: ValidationResult,
         hash22000_path: str,
@@ -380,10 +379,19 @@ class HandshakeValidationService:
             QualityClassification.INVALID: HandshakeQuality.INVALID,
         }
 
+        access_point_id: int | None = None
+        if capture.bssid:
+            access_point_id = db_session.scalar(
+                select(AccessPoint.id).where(
+                    AccessPoint.engagement_id == capture.engagement_id,
+                    AccessPoint.bssid == capture.bssid,
+                )
+            )
+
         artifact = HandshakeArtifact(
             capture_id=capture.id,
-            access_point_id=capture.access_point_id,
-            station_id=capture.station_id,
+            access_point_id=access_point_id,
+            station_id=None,
             kind=result.kind,
             message_pair=result.message_pair,
             quality=quality_map.get(result.quality, HandshakeQuality.INVALID),
@@ -399,9 +407,7 @@ class HandshakeValidationService:
 
         return artifact
 
-    def _persist_hashfile(
-        self, artifact: HandshakeArtifact, temp_path: str
-    ) -> str | None:
+    def _persist_hashfile(self, artifact: HandshakeArtifact, temp_path: str) -> str | None:
         """Copia el archivo .22000 temporal a una ubicación permanente."""
         from aegiswifi.core.config import get_settings
 
@@ -449,9 +455,7 @@ class HandshakeValidationService:
             source_file=capture.path if capture else None,
         )
 
-    def build_report(
-        self, artifact: HandshakeArtifact
-    ) -> dict[str, Any]:
+    def build_report(self, artifact: HandshakeArtifact) -> dict[str, Any]:
         """Construye un reporte legible desde un artifact."""
         from aegiswifi.validation.schemas import HandshakeReport
 

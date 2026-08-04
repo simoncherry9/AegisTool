@@ -79,6 +79,7 @@ ignore = ["PLR0913", "PLR2004"]
 
 [tool.ruff.format]
 quote-style = "double"
+line-ending = "lf"
 
 # --- Pytest ---
 [tool.pytest.ini_options]

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from aegiswifi.core.config import get_settings
 from aegiswifi.core.security import create_access_token, decode_access_token
 from aegiswifi.database.engine import get_db
 from aegiswifi.database.models import User
@@ -43,6 +44,17 @@ def require_current_user(user: User | None = Depends(get_current_user)) -> User:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_api_user(user: User | None = Depends(get_current_user)) -> User | None:
+    """Protege la API cuando la autenticación está habilitada.
+
+    El bypass existe exclusivamente para instalaciones y tests que configuran
+    explícitamente ``security.require_auth=false``.
+    """
+    if not get_settings().security.require_auth:
+        return user
+    return require_current_user(user)
 
 
 @router.post("/login", response_model=TokenResponse)

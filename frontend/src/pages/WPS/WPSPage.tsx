@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { wpsApi } from '../../api/wps'
 import { discoveryApi, type AccessPoint } from '../../api/discovery'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
+import { interfacesApi } from '../../api/interfaces'
 
 export function WPSPage() {
   const [wpsAps, setWpsAps] = useState<AccessPoint[]>([])
@@ -22,9 +23,8 @@ export function WPSPage() {
       if (status?.interface) {
         setCurrentInterface(status.interface)
       } else {
-        const { api } = await import('../../api/client')
-        const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
-        const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
+        const ifcs = await interfacesApi.list().catch(() => [])
+        const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
         if (mon) setCurrentInterface(mon.name)
       }
     } catch (err: any) {

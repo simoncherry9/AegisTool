@@ -175,7 +175,18 @@ class TestRun:
 
         mock_process = MagicMock()
         mock_process.stdout = mock_stdout
-        mock_process.wait = AsyncMock(side_effect=lambda: asyncio.sleep(3600))
+        wait_calls = 0
+
+        async def wait_until_killed() -> int:
+            nonlocal wait_calls
+            wait_calls += 1
+            if wait_calls == 1:
+                await asyncio.sleep(3600)
+            if wait_calls == 2:
+                raise TimeoutError
+            return 0
+
+        mock_process.wait = AsyncMock(side_effect=wait_until_killed)
         mock_process.returncode = None
         mock_process.terminate = MagicMock()
         mock_process.kill = MagicMock()
@@ -287,15 +298,8 @@ class TestGracefulShutdown:
         mock_process = await self._make_mock_process()
         sup._process = mock_process
 
-        # Hacer que asyncio.wait_for lance TimeoutError → kill path.
-        # Nota: asyncio.wait_for(coro) llama a coro para obtener la corrutina
-        # antes de mockear — por eso mock_process.wait se invoca 2 veces:
-        # 1) en la llamada a wait_for, 2) después de kill en el except.
-        with patch(
-            "aegiswifi.jobs.process_supervisor.asyncio.wait_for",
-            AsyncMock(side_effect=TimeoutError()),
-        ):
-            await sup.graceful_shutdown()
+        mock_process.wait = AsyncMock(side_effect=[TimeoutError(), 0])
+        await sup.graceful_shutdown()
 
         mock_process.terminate.assert_called_once()
         mock_process.kill.assert_called_once()

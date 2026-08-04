@@ -75,8 +75,7 @@ class DictionaryManager:
                     path=path_str,
                     name=entry.name,
                     size_bytes=entry.stat().st_size,
-                    is_sorted="sorted" in entry.name.lower()
-                    or "rockyou" in entry.name.lower(),
+                    is_sorted="sorted" in entry.name.lower() or "rockyou" in entry.name.lower(),
                 )
                 self._cache[path_str] = info
 
@@ -101,6 +100,44 @@ class DictionaryManager:
         )
         self._cache[info.path] = info
         return info
+
+    def create_custom_wordlist(self, name: str, words_list: list[str]) -> DictionaryInfo:
+        """Crea una wordlist local sin permitir escapar del directorio administrado."""
+        safe_name = Path(name).name.strip()
+        if safe_name.lower().endswith(".txt"):
+            safe_name = safe_name[:-4]
+        if not safe_name or safe_name in {".", ".."}:
+            raise ValueError("nombre de diccionario inválido")
+
+        directory = Path("data/wordlists")
+        directory.mkdir(parents=True, exist_ok=True)
+        file_path = directory / f"{safe_name}.txt"
+        if file_path.exists():
+            raise FileExistsError(f"el diccionario '{safe_name}' ya existe")
+
+        normalized = [word.strip() for word in words_list if word.strip()]
+        file_path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
+        info = DictionaryInfo(
+            path=str(file_path.resolve()),
+            name=file_path.name,
+            size_bytes=file_path.stat().st_size,
+            line_count=len(normalized),
+        )
+        self._cache[info.path] = info
+        return info
+
+    def delete_custom_wordlist(self, name: str) -> bool:
+        """Elimina únicamente wordlists dentro del directorio local administrado."""
+        safe_name = Path(name).name
+        if not safe_name.lower().endswith(".txt"):
+            safe_name += ".txt"
+        directory = Path("data/wordlists").resolve()
+        file_path = (directory / safe_name).resolve()
+        if file_path.parent != directory or not file_path.is_file():
+            return False
+        file_path.unlink()
+        self._cache.pop(str(file_path), None)
+        return True
 
     # ------------------------------------------------------------------
     # Conteo de líneas
@@ -162,6 +199,7 @@ class DictionaryManager:
             raise RuntimeError("7z failed")
         return len(result.stdout.decode("utf-8", errors="replace").splitlines())
 
+
 def scan_system_wordlists() -> list[str]:
     """Scans /usr/share/wordlists/ for .txt and .lst files."""
     paths = []
@@ -172,25 +210,6 @@ def scan_system_wordlists() -> list[str]:
                 paths.append(str(p.resolve()))
     return sorted(paths)
 
-def create_custom_wordlist(name: str, words_list: list[str]) -> str:
-    """Saves a custom wordlist to data/wordlists/{name}.txt"""
-    dir_path = Path("data/wordlists")
-    dir_path.mkdir(parents=True, exist_ok=True)
-    if not name.endswith(".txt"):
-        name += ".txt"
-    file_path = dir_path / name
-    file_path.write_text("\\n".join(words_list) + "\\n", encoding="utf-8")
-    return str(file_path.resolve())
-
-def delete_custom_wordlist(name: str) -> bool:
-    """Deletes custom wordlist."""
-    if not name.endswith(".txt"):
-        name += ".txt"
-    file_path = Path("data/wordlists") / name
-    if file_path.is_file():
-        file_path.unlink()
-        return True
-    return False
 
 def list_all_wordlists() -> list[str]:
     """Combines system + custom wordlists."""

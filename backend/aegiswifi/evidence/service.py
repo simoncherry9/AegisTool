@@ -40,10 +40,3 @@ def list_evidence(
         stmt = stmt.where(Capture.category == category)
     stmt = stmt.limit(limit).offset(offset)
     return list(session.scalars(stmt).all())
-
-
-def delete_evidence(session: Session, evidence_id: int) -> None:
-    """Elimina una captura de la base de datos (no del disco)."""
-    capture = get_evidence(session, evidence_id)
-    session.delete(capture)
-    session.commit()

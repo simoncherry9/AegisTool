@@ -74,6 +74,7 @@ import hashlib
 import hmac
 import json
 import time
+from typing import cast
 
 
 def hash_password(password: str) -> str:
@@ -97,7 +98,9 @@ def _urlsafe_b64decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def create_access_token(user_id: int, username: str, role: str, expires_in_seconds: int = 86400) -> str:
+def create_access_token(
+    user_id: int, username: str, role: str, expires_in_seconds: int = 86400
+) -> str:
     """Genera un JWT firmado con HMAC-SHA256 usando la clave Fernet como secreto."""
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {
@@ -106,15 +109,15 @@ def create_access_token(user_id: int, username: str, role: str, expires_in_secon
         "role": role,
         "exp": int(time.time()) + expires_in_seconds,
     }
-    
+
     header_b64 = _urlsafe_b64encode(json.dumps(header).encode("utf-8"))
     payload_b64 = _urlsafe_b64encode(json.dumps(payload).encode("utf-8"))
-    
-    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+
+    signing_input = f"{header_b64}.{payload_b64}".encode()
     secret = get_encryption_key().encode("utf-8")
     signature = hmac.new(secret, signing_input, hashlib.sha256).digest()
     sig_b64 = _urlsafe_b64encode(signature)
-    
+
     return f"{header_b64}.{payload_b64}.{sig_b64}"
 
 
@@ -125,21 +128,21 @@ def decode_access_token(token: str) -> dict[str, object] | None:
         if len(parts) != 3:
             return None
         header_b64, payload_b64, sig_b64 = parts
-        
-        signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+
+        signing_input = f"{header_b64}.{payload_b64}".encode()
         secret = get_encryption_key().encode("utf-8")
         expected_sig = hmac.new(secret, signing_input, hashlib.sha256).digest()
-        
+
         if not hmac.compare_digest(_urlsafe_b64encode(expected_sig), sig_b64):
             return None
-        
+
         payload_bytes = _urlsafe_b64decode(payload_b64)
-        payload = json.loads(payload_bytes.decode("utf-8"))
-        
-        if payload.get("exp", 0) < time.time():
+        payload = cast(dict[str, object], json.loads(payload_bytes.decode("utf-8")))
+
+        expires_at = payload.get("exp", 0)
+        if not isinstance(expires_at, (int, float)) or expires_at < time.time():
             return None
-            
+
         return payload
     except Exception:
         return None
-

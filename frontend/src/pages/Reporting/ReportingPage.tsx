@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react'
-import { reportingApi } from '../../api/reporting'
-import { api } from '../../api/client'
+import { reportingApi, type ReportFormat, type ReportItem } from '../../api/reporting'
+import { engagementsApi, type Engagement } from '../../api/engagements'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
 
 export function ReportingPage() {
-  const [engagements, setEngagements] = useState<any[]>([])
-  const [reports, setReports] = useState<any[]>([])
+  const [engagements, setEngagements] = useState<Engagement[]>([])
+  const [reports, setReports] = useState<ReportItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
   // form state
   const [selectedEngagement, setSelectedEngagement] = useState('')
-  const [format, setFormat] = useState('pdf')
+  const [format, setFormat] = useState<ReportFormat>('html')
   const [sections, setSections] = useState({
     executive: true,
     technical: true,
@@ -22,14 +22,14 @@ export function ReportingPage() {
   const loadData = async () => {
     try {
       const [engData, repData] = await Promise.all([
-        api.get<any[]>('/engagements').catch(() => []),
+        engagementsApi.list().catch(() => []),
         reportingApi.list().catch(() => [])
       ])
-      setEngagements((engData || []) as any[])
-      setReports((repData || []) as any[])
-      if (engData && (engData as any[]).length > 0) setSelectedEngagement((engData as any[])[0].id)
-    } catch (err: any) {
-      setError(err.message)
+      setEngagements(engData)
+      setReports(repData)
+      if (engData.length > 0) setSelectedEngagement(String(engData[0].id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron cargar los informes')
     } finally {
       setLoading(false)
     }
@@ -44,15 +44,32 @@ export function ReportingPage() {
     setGenerating(true)
     try {
       await reportingApi.generate({
-        engagement_id: selectedEngagement,
+        engagement_id: Number(selectedEngagement),
         format,
-        sections
+        include_executive_summary: sections.executive,
+        include_findings: sections.technical,
+        include_evidence: sections.evidence,
+        include_methodology: sections.technical,
       })
       await loadData()
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo generar el informe')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleDownload = async (report: ReportItem) => {
+    try {
+      const blob = await reportingApi.download(report.id)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `informe-${report.engagement_id}.${report.format}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo descargar el informe')
     }
   }
 
@@ -85,9 +102,9 @@ export function ReportingPage() {
             </div>
             <div className="form-group">
               <label className="form-label">Formato</label>
-              <select className="form-select" value={format} onChange={(e) => setFormat(e.target.value)}>
-                <option value="pdf">PDF (Profesional)</option>
+              <select className="form-select" value={format} onChange={(e) => setFormat(e.target.value as ReportFormat)}>
                 <option value="html">HTML (Interactivo)</option>
+                <option value="pdf">PDF (requiere wkhtmltopdf)</option>
                 <option value="json">JSON (Datos puros)</option>
               </select>
             </div>
@@ -108,8 +125,8 @@ export function ReportingPage() {
                 </label>
               </div>
             </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={generating}>
-              {generating ? 'Generando...' : '📄 Generar Reporte'}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={generating || !selectedEngagement}>
+              {generating ? 'Generando...' : 'Generar informe'}
             </button>
           </form>
         </div>
@@ -136,18 +153,20 @@ export function ReportingPage() {
                 <tbody>
                   {reports.map(r => (
                     <tr key={r.id}>
-                      <td style={{ fontWeight: 600 }}>{r.name || `Reporte ${r.id.substring(0,6)}`}</td>
+                      <td style={{ fontWeight: 600 }}>Informe {r.id.substring(0, 6)}</td>
                       <td style={{ textTransform: 'uppercase', fontSize: 12, color: 'var(--text-muted)' }}>{r.format}</td>
                       <td>
-                        {r.status === 'generating' ? (
+                        {r.status === 'GENERATING' ? (
                           <span className="badge badge-draft" style={{ animation: 'pulse 1.5s infinite' }}>Generando</span>
+                        ) : r.status === 'FAILED' ? (
+                          <span className="badge badge-failed" title={r.error || undefined}>Falló</span>
                         ) : (
                           <span className="badge badge-completed">Completado</span>
                         )}
                       </td>
                       <td>
-                        {r.status === 'completed' && (
-                          <button className="btn btn-sm btn-secondary" onClick={() => window.open(`/api/v1/reports/${r.id}/download`, '_blank')}>
+                        {r.status === 'COMPLETE' && (
+                          <button className="btn btn-sm btn-secondary" onClick={() => handleDownload(r)}>
                             Descargar
                           </button>
                         )}

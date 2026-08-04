@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from aegiswifi.core.exceptions import NotFound
 from aegiswifi.database.models import Capture, Engagement, EngagementStatus
-from aegiswifi.evidence.service import delete_evidence, get_evidence, list_evidence
+from aegiswifi.evidence.service import get_evidence, list_evidence
 from aegiswifi.evidence.store import EvidenceStore
 
 _TMP = tempfile.gettempdir()
@@ -244,15 +244,6 @@ class TestEvidenceService:
         filtered = list_evidence(db_session, category="log")
         assert all(c.category == "log" for c in filtered)
 
-    def test_delete_evidence(self, db_session: Session):
-        eng = _create_engagement(db_session)
-        cap = _create_evidence_in_db(db_session, engagement_id=eng.id)
-        assert get_evidence(db_session, cap.id) is not None
-
-        delete_evidence(db_session, cap.id)
-        with pytest.raises(NotFound):
-            get_evidence(db_session, cap.id)
-
 
 # ===================================================================
 # Evidence API Tests
@@ -316,12 +307,9 @@ class TestEvidenceAPI:
         resp = client.get(f"/api/v1/evidence/{cap.id}/download")
         assert resp.status_code == 404
 
-    def test_delete_evidence_api(self, db_session: Session, client: TestClient):
+    def test_evidence_cannot_be_deleted_api(self, db_session: Session, client: TestClient):
         eng = _create_engagement(db_session)
         cap = _create_evidence_in_db(db_session, engagement_id=eng.id)
         resp = client.delete(f"/api/v1/evidence/{cap.id}")
-        assert resp.status_code == 204
-
-        # Verificar que ya no existe
-        resp = client.get(f"/api/v1/evidence/{cap.id}")
-        assert resp.status_code == 404
+        assert resp.status_code == 405
+        assert get_evidence(db_session, cap.id).id == cap.id

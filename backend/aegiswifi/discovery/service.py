@@ -211,7 +211,7 @@ async def find_aps_with_wps() -> list[AccessPointDetail]:
     return await _inventory.find_aps_with_wps()
 
 
-async def recent_events(limit: int = 50) -> list[dict]:
+async def recent_events(limit: int = 50) -> list[dict[str, object]]:
     """Retorna los eventos más recientes."""
     events = await _inventory.recent_events(limit)
     return [e.model_dump() for e in events]

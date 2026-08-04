@@ -483,7 +483,6 @@ def cracking_analyze(
     artifact_id: int = typer.Argument(..., help="ID del HandshakeArtifact"),
 ) -> None:
     """Analiza un handshake y genera un plan de cracking."""
-    import json as _json
 
     from aegiswifi.cracking.dictionary import DictionaryManager
     from aegiswifi.cracking.planner import CrackingPlanner
@@ -526,8 +525,7 @@ def cracking_analyze(
         typer.echo(f"Plan de {len(plan.stages)} etapa(s):")
         for i, stage in enumerate(plan.stages, 1):
             timeout_min = stage.timeout_seconds / 60 if stage.timeout_seconds else 0
-            typer.echo(f"  {i}. {stage.mode.value:30s} "
-                       f"(timeout: {timeout_min:.0f} min)")
+            typer.echo(f"  {i}. {stage.mode.value:30s} (timeout: {timeout_min:.0f} min)")
             if stage.dictionary_path:
                 typer.echo(f"     Diccionario: {stage.dictionary_path}")
             if stage.rules_path:
@@ -541,7 +539,9 @@ def cracking_analyze(
 
 @cracking_app.command("list")
 def cracking_list(
-    engagement_id: int | None = typer.Option(None, "--engagement", "-e", help="Filtrar por engagement"),
+    engagement_id: int | None = typer.Option(
+        None, "--engagement", "-e", help="Filtrar por engagement"
+    ),
 ) -> None:
     """Lista trabajos de cracking."""
     from aegiswifi.cracking.service import get_cracking_service
@@ -584,18 +584,23 @@ def cracking_status(
         typer.echo(f"Error: CrackingJob #{job_id} no encontrado.")
         raise typer.Exit(code=1)
 
-    typer.echo(_json.dumps({
-        "id": job.id,
-        "artifact_id": job.artifact_id,
-        "strategy": job.strategy,
-        "status": job.status,
-        "progress": job.progress,
-        "speed": job.speed,
-        "recovered": job.recovered,
-        "keyspace": job.keyspace,
-        "started_at": str(job.started_at) if job.started_at else None,
-        "finished_at": str(job.finished_at) if job.finished_at else None,
-    }, indent=2))
+    typer.echo(
+        _json.dumps(
+            {
+                "id": job.id,
+                "artifact_id": job.artifact_id,
+                "strategy": job.strategy,
+                "status": job.status,
+                "progress": job.progress,
+                "speed": job.speed,
+                "recovered": job.recovered,
+                "keyspace": job.keyspace,
+                "started_at": str(job.started_at) if job.started_at else None,
+                "finished_at": str(job.finished_at) if job.finished_at else None,
+            },
+            indent=2,
+        )
+    )
 
 
 @cracking_app.command("start")
@@ -621,7 +626,11 @@ def cracking_start(
             typer.echo(f"Error: CrackingJob #{job_id} no encontrado.")
             raise typer.Exit(code=1)
 
-        artifact = db.get(HandshakeArtifact, job.artifact_id)
+        artifact_id = job.artifact_id
+        if artifact_id is None:
+            typer.echo(f"Error: CrackingJob #{job_id} no tiene un handshake asociado.")
+            raise typer.Exit(code=1)
+        artifact = db.get(HandshakeArtifact, artifact_id)
         if artifact is None:
             typer.echo(f"Error: HandshakeArtifact #{job.artifact_id} no encontrado.")
             raise typer.Exit(code=1)
@@ -637,14 +646,12 @@ def cracking_start(
         planner = CrackingPlanner(dict_manager, rules_manager)
         plan = planner.build_plan(
             job_id=job_id,
-            artifact_id=job.artifact_id,
+            artifact_id=artifact_id,
             hash_file_path=artifact.hash22000_path or "",
         )
 
         typer.echo(f"Ejecutando plan de {len(plan.stages)} etapa(s)...")
-        result = asyncio.run(
-            service.execute_plan(plan, engagement_id=engagement_id, session=db)
-        )
+        result = asyncio.run(service.execute_plan(plan, engagement_id=engagement_id, session=db))
 
     typer.echo(result.model_dump_json(indent=2))
     if result.cracked:
@@ -690,7 +697,6 @@ def validation_validate(
 
     from aegiswifi.database.engine import get_sessionmaker
     from aegiswifi.database.models import Capture
-    from aegiswifi.validation.schemas import ValidationRequest
     from aegiswifi.validation.service import get_validation_service
 
     if not capture_id and not file_path:
@@ -747,8 +753,9 @@ def validation_list(
     with SessionLocal() as db:
         service = get_validation_service()
 
-        from aegiswifi.database.models import HandshakeArtifact
         from sqlalchemy import select
+
+        from aegiswifi.database.models import HandshakeArtifact
 
         stmt = select(HandshakeArtifact)
         if quality:
@@ -813,9 +820,7 @@ def validation_reprocess(
 
         capture = db.get(Capture, artifact.capture_id) if artifact.capture_id else None
         service = get_validation_service()
-        result = asyncio.run(
-            service.validate_capture(capture=capture, db_session=db, force=True)
-        )
+        result = asyncio.run(service.validate_capture(capture=capture, db_session=db, force=True))
 
     typer.echo(_json.dumps(result.model_dump(exclude_none=True), indent=2))
     if result.validated:

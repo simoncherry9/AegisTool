@@ -15,7 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from aegiswifi.discovery import oui
-from aegiswifi.discovery.classifier import classify_security, detect_degraded_security
+from aegiswifi.discovery.classifier import (
+    SecurityClassification,
+    classify_security,
+    detect_degraded_security,
+)
 from aegiswifi.discovery.schemas import (
     AccessPointDetail,
     ClientSummary,
@@ -93,7 +97,11 @@ class DiscoveryInventory:
                 events.append(
                     DiscoveryEvent(
                         event_type="ap_discovered",
-                        data={"bssid": bssid, "ssid": detail.ssid, "protocol": str(detail.protocol)},
+                        data={
+                            "bssid": bssid,
+                            "ssid": detail.ssid,
+                            "protocol": str(detail.protocol),
+                        },
                     )
                 )
             else:
@@ -140,7 +148,11 @@ class DiscoveryInventory:
             events: list[DiscoveryEvent] = []
 
             probe_requests = data.get("probed_essids", "")
-            probes = [p.strip() for p in probe_requests.split(",") if p.strip()] if probe_requests else []
+            probes = (
+                [p.strip() for p in probe_requests.split(",") if p.strip()]
+                if probe_requests
+                else []
+            )
 
             power = data.get("power")
             signal = int(power) if power is not None and power != "" and power != "?" else None
@@ -154,7 +166,7 @@ class DiscoveryInventory:
                     probe_requests=probes,
                     first_seen=now,
                     last_seen=now,
-                    vendor=await oui.get_vendor(mac)
+                    vendor=await oui.get_vendor(mac),
                 )
                 self._clients[mac] = summary
                 events.append(
@@ -168,9 +180,10 @@ class DiscoveryInventory:
                     update={
                         "signal": signal if signal else existing.signal,
                         "last_seen": now,
-                        "associated_bssid": data.get("bssid", "").upper() or existing.associated_bssid,
+                        "associated_bssid": data.get("bssid", "").upper()
+                        or existing.associated_bssid,
                         "probe_requests": probes or existing.probe_requests,
-                        "vendor": existing.vendor or await oui.get_vendor(mac)
+                        "vendor": existing.vendor or await oui.get_vendor(mac),
                     }
                 )
                 self._clients[mac] = summary
@@ -275,14 +288,14 @@ class DiscoveryInventory:
         for client in self._clients.values():
             if client.associated_bssid:
                 counts[client.associated_bssid] = counts.get(client.associated_bssid, 0) + 1
-        
+
         for ap in aps:
             ap.clients_count = counts.get(ap.bssid, 0)
 
     @staticmethod
     def _build_ap_detail(
         data: dict[str, Any],
-        classification: dict,
+        classification: SecurityClassification,
         now: datetime,
     ) -> AccessPointDetail:
         """Construye un AccessPointDetail desde datos crudos + clasificación."""
@@ -306,7 +319,9 @@ class DiscoveryInventory:
             wpa3_supported=classification.get("wpa3_supported", False),
             transition_mode=classification.get("transition_mode", TransitionMode.NONE),
             degraded=classification.get("degraded", False),
-            beacon_count=int(data.get("beacons", 0)) if data.get("beacons", "").strip().isdigit() else None,
+            beacon_count=int(data.get("beacons", 0))
+            if data.get("beacons", "").strip().isdigit()
+            else None,
             first_seen=now,
             last_seen=now,
         )
@@ -353,11 +368,17 @@ class DiscoveryInventory:
         if filters.pmf is not None:
             result = [ap for ap in result if ap.pmf == filters.pmf]
         if filters.signal_min is not None:
-            result = [ap for ap in result if ap.signal is not None and ap.signal >= filters.signal_min]
+            result = [
+                ap for ap in result if ap.signal is not None and ap.signal >= filters.signal_min
+            ]
         if filters.signal_max is not None:
-            result = [ap for ap in result if ap.signal is not None and ap.signal <= filters.signal_max]
+            result = [
+                ap for ap in result if ap.signal is not None and ap.signal <= filters.signal_max
+            ]
         if filters.vendor is not None:
-            result = [ap for ap in result if ap.vendor and filters.vendor.lower() in ap.vendor.lower()]
+            result = [
+                ap for ap in result if ap.vendor and filters.vendor.lower() in ap.vendor.lower()
+            ]
 
         # Paginación
         result = result[filters.offset : filters.offset + filters.limit]
@@ -367,4 +388,4 @@ class DiscoveryInventory:
     def _trim_history(self) -> None:
         """Recorta el ring buffer de eventos al límite."""
         if len(self._event_history) > self._max_events:
-            self._event_history = self._event_history[-self._max_events:]
+            self._event_history = self._event_history[-self._max_events :]

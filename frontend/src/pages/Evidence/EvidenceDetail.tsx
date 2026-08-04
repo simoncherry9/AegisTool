@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
 import { evidenceApi, type CaptureDetail } from '../../api/evidence'
 
 export function EvidenceDetail() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [item, setItem] = useState<CaptureDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -17,13 +16,17 @@ export function EvidenceDetail() {
       .finally(() => setLoading(false))
   }, [id])
 
-  async function handleDelete() {
-    if (!confirm('Eliminar esta evidencia permanentemente?')) return
+  async function handleDownload() {
     try {
-      await evidenceApi.delete(Number(id))
-      navigate('/evidence')
-    } catch (e: any) {
-      setError(e.message)
+      const blob = await evidenceApi.download(Number(id))
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = item?.original_filename || `evidencia-${id}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo descargar la evidencia')
     }
   }
 
@@ -43,8 +46,7 @@ export function EvidenceDetail() {
           <div className="subtitle">{item.original_filename || 'Sin nombre de archivo'}</div>
         </div>
         <div className="detail-actions">
-          <a className="btn btn-primary" href={'/api/v1/evidence/' + item.id + '/download'}>📥 Descargar</a>
-          <button className="btn btn-danger" onClick={handleDelete}>🗑 Eliminar</button>
+          <button className="btn btn-primary" onClick={handleDownload}>Descargar evidencia</button>
         </div>
       </div>
 
@@ -79,7 +81,7 @@ export function EvidenceDetail() {
           <div className="detail-grid">
             <div className="detail-field">
               <div className="detail-label">Engagement</div>
-              <div className="detail-value"><a href={'/engagements/' + item.engagement_id}>#{item.engagement_id}</a></div>
+              <div className="detail-value"><Link to={'/engagements/' + item.engagement_id}>#{item.engagement_id}</Link></div>
             </div>
             <div className="detail-field">
               <div className="detail-label">Job</div>

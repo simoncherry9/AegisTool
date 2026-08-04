@@ -18,11 +18,10 @@ from aegiswifi.database.engine import get_db
 from aegiswifi.database.models import Capture, HandshakeArtifact
 from aegiswifi.validation.schemas import (
     HandshakeReport,
-    QualityClassification,
     ValidationRequest,
     ValidationResult,
 )
-from aegiswifi.validation.service import HandshakeValidationService, get_validation_service
+from aegiswifi.validation.service import get_validation_service
 
 router = APIRouter(prefix="/validation", tags=["validation"])
 
@@ -71,19 +70,19 @@ async def validate_capture(
         )
 
     if not capture and req.file_path:
-        # Si se envía solo el file_path manual, debemos crear un Capture 
+        # Si se envía solo el file_path manual, debemos crear un Capture
         # en la base de datos para poder persistir el Artifact.
         from aegiswifi.database.models import Engagement, EngagementStatus
+
         eng_id = req.engagement_id
         if not eng_id:
-            active_eng = db.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
+            active_eng = (
+                db.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
+            )
             eng_id = active_eng.id if active_eng else 1
-            
+
         capture = Capture(
-            engagement_id=eng_id,
-            path=req.file_path,
-            category="handshake",
-            format="pcapng"
+            engagement_id=eng_id, path=req.file_path, category="handshake", format="pcapng"
         )
         db.add(capture)
         db.commit()
@@ -122,7 +121,7 @@ def list_artifacts(
     quality: str | None = Query(None, max_length=16),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),  # noqa: B008
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """Lista HandshakeArtifacts, opcionalmente filtrados."""
     from sqlalchemy import select
 
@@ -145,7 +144,7 @@ def list_artifacts(
 def get_artifact(
     artifact_id: int,
     db: Session = Depends(get_db),  # noqa: B008
-) -> dict:
+) -> dict[str, object]:
     """Obtiene el detalle de un HandshakeArtifact."""
     artifact = db.get(HandshakeArtifact, artifact_id)
     if artifact is None:

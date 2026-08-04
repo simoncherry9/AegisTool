@@ -10,13 +10,12 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from structlog import get_logger
 
-from aegiswifi.core.config import REPO_ROOT
 from aegiswifi.core.privileged import (
     run_aireplay_privileged,
     run_privileged_cmd,
@@ -52,9 +51,12 @@ async def start_capture(
     # Comando airodump-ng filtrado por BSSID
     args = [
         "airodump-ng",
-        "--bssid", bssid,
-        "--write", output_prefix,
-        "--write-interval", "1",
+        "--bssid",
+        bssid,
+        "--write",
+        output_prefix,
+        "--write-interval",
+        "1",
     ]
     if channel:
         args.extend(["--channel", str(channel)])
@@ -68,7 +70,7 @@ async def start_capture(
             "interface": interface,
             "bssid": bssid,
             "channel": channel,
-            "started_at": datetime.now(timezone.utc),
+            "started_at": datetime.now(UTC),
             "elapsed_seconds": 0,
             "handshake_detected": False,
             "error": "No se pudo iniciar airodump-ng",
@@ -82,7 +84,7 @@ async def start_capture(
         "interface": interface,
         "bssid": bssid,
         "channel": channel,
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.now(UTC),
         "elapsed_seconds": 0,
         "handshake_detected": False,
         "pcap_path": None,
@@ -123,8 +125,10 @@ async def _monitor_capture(capture_id: str) -> None:
             await asyncio.sleep(5)
             if entry["status"] == CaptureStatus.CAPTURING:
                 deauth_args = [
-                    "--deauth", str(deauth_count),
-                    "-a", bssid,
+                    "--deauth",
+                    str(deauth_count),
+                    "-a",
+                    bssid,
                     "--ignore-negative-one",
                     interface,
                 ]
@@ -151,7 +155,7 @@ async def _monitor_capture(capture_id: str) -> None:
 
             # Verificar si el cap file tiene un handshake válido convertible
             if cap_path.exists() and cap_path.stat().st_size > 0:
-                # En lugar de usar aircrack-ng (que da falsos positivos), 
+                # En lugar de usar aircrack-ng (que da falsos positivos),
                 # forzamos la conversión real a .22000. Si esto tiene éxito,
                 # sabemos 100% que el handshake es válido y podemos detener la captura.
                 hash_path, conv_error = await _convert_to_22000(str(cap_path))
@@ -159,7 +163,11 @@ async def _monitor_capture(capture_id: str) -> None:
                     entry["handshake_detected"] = True
                     entry["pcap_path"] = str(cap_path)
                     entry["hash_path"] = hash_path
-                    log.info("handshake detected and converted successfully", bssid=bssid, capture_id=capture_id)
+                    log.info(
+                        "handshake detected and converted successfully",
+                        bssid=bssid,
+                        capture_id=capture_id,
+                    )
                     break
 
             await asyncio.sleep(2)
@@ -176,47 +184,55 @@ async def _monitor_capture(capture_id: str) -> None:
         # Guardar pcap_path si existe
         if cap_path.exists() and cap_path.stat().st_size > 0:
             entry["pcap_path"] = str(cap_path)
-            
+
             if entry["handshake_detected"] and entry.get("hash_path"):
                 entry["status"] = CaptureStatus.COMPLETE
             elif entry["status"] == CaptureStatus.CAPTURING:
                 entry["status"] = CaptureStatus.FAILED
-                entry["error"] = "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
-                
+                entry["error"] = (
+                    "Timeout: no se detectó handshake válido en el tiempo establecido (no se pudo convertir a .22000)."
+                )
+
             # Integrar SIEMPRE con ValidationService para que aparezca en el apartado de handshakes (incluso si es inválido)
             try:
-                from aegiswifi.database.engine import SessionLocal
-                from aegiswifi.validation.service import get_validation_service
+                from aegiswifi.database.engine import get_sessionmaker
+                from aegiswifi.database.models import AccessPoint, Engagement, EngagementStatus
                 from aegiswifi.database.models import Capture as DBCapture
-                from aegiswifi.database.models import Engagement, AccessPoint, EngagementStatus
-                with SessionLocal() as db_session:
-                    active_eng = db_session.query(Engagement).filter_by(status=EngagementStatus.ACTIVE.value).first()
+                from aegiswifi.validation.service import get_validation_service
+
+                with get_sessionmaker()() as db_session:
+                    active_eng = (
+                        db_session.query(Engagement)
+                        .filter_by(status=EngagementStatus.ACTIVE.value)
+                        .first()
+                    )
                     eng_id = active_eng.id if active_eng else 1
-                    
+
                     ap = db_session.query(AccessPoint).filter_by(bssid=entry["bssid"]).first()
                     ap_id = ap.id if ap else None
 
                     db_cap = DBCapture(
                         engagement_id=eng_id,
                         access_point_id=ap_id,
-                        path=str(cap_path), 
+                        path=str(cap_path),
                         category="handshake",
-                        format="cap"
+                        format="cap",
                     )
                     db_session.add(db_cap)
                     db_session.commit()
                     db_session.refresh(db_cap)
-                    
+
                     val_service = get_validation_service()
-                    result = await val_service.validate_capture(capture=db_cap, db_session=db_session, force=True)
+                    result = await val_service.validate_capture(
+                        capture=db_cap, db_session=db_session, force=True
+                    )
                     if result.artifact_id:
                         entry["artifact_id"] = result.artifact_id
             except Exception as e:
                 log.error("Error al persistir/validar captura en DB", error=str(e))
-        else:
-            if entry["status"] == CaptureStatus.CAPTURING:
-                entry["status"] = CaptureStatus.FAILED
-                entry["error"] = "No se generó ningún archivo de captura."
+        elif entry["status"] == CaptureStatus.CAPTURING:
+            entry["status"] = CaptureStatus.FAILED
+            entry["error"] = "No se generó ningún archivo de captura."
 
     except Exception as exc:
         log.error("capture monitoring error", capture_id=capture_id, error=str(exc))
@@ -249,7 +265,7 @@ async def _check_handshake(cap_path: str, bssid: str) -> bool:
 async def _convert_to_22000(cap_path: str) -> tuple[str | None, str | None]:
     """Convierte un .cap con handshake a formato .22000 para Hashcat."""
     hash_path = cap_path.replace(".cap", ".22000")
-    
+
     # 1. Intentar con hcxpcapngtool (estándar moderno)
     stdout, stderr, rc = await run_privileged_cmd(
         ["hcxpcapngtool", "-o", hash_path, cap_path],
@@ -257,9 +273,9 @@ async def _convert_to_22000(cap_path: str) -> tuple[str | None, str | None]:
     )
     if Path(hash_path).exists() and Path(hash_path).stat().st_size > 0:
         return hash_path, None
-        
+
     error_hcx = stderr.strip() if stderr else stdout.strip()
-    
+
     # 2. Fallback a aircrack-ng -j (Aircrack >= 1.7 genera .hc22000)
     # Aircrack-ng añade automáticamente la extensión, así que le pasamos el prefijo
     prefix_path = cap_path.replace(".cap", "")
@@ -267,7 +283,7 @@ async def _convert_to_22000(cap_path: str) -> tuple[str | None, str | None]:
         ["aircrack-ng", cap_path, "-j", prefix_path],
         timeout=15,
     )
-    
+
     # Aircrack-ng puede generar archivo.hc22000 o archivo.hccapx
     possible_outputs = [f"{prefix_path}.hc22000", f"{prefix_path}.hccapx", f"{prefix_path}.22000"]
     for p in possible_outputs:
@@ -279,7 +295,7 @@ async def _convert_to_22000(cap_path: str) -> tuple[str | None, str | None]:
                 except Exception:
                     pass
             return hash_path, None
-            
+
     return None, f"hcxpcapngtool: {error_hcx} | aircrack-ng fallback también falló."
 
 

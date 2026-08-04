@@ -13,7 +13,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/tools': 'Herramientas del Sistema',
 }
 
-export function Header() {
+export function Header({ onMenu }: { onMenu: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
@@ -27,9 +27,14 @@ export function Header() {
 
   return (
     <header className="header flex-between">
-      <div>
+      <div className="header-context">
+        <button className="mobile-menu" onClick={onMenu} aria-label="Abrir navegación">
+          <span /><span /><span />
+        </button>
+        <div>
         <div className="header-title">{title}</div>
-        <div className="header-subtitle">AegisWiFi — Plataforma de auditoría inalámbrica</div>
+        <div className="header-subtitle">Centro de operaciones inalámbricas</div>
+        </div>
       </div>
       {user && (
         <div className="user-profile-badge">
@@ -37,7 +42,7 @@ export function Header() {
             <span className="user-name">{user.full_name || user.username}</span>
             <span className={`badge badge-role-${user.role.toLowerCase()}`}>{user.role}</span>
           </div>
-          <button className="btn-logout" onClick={handleLogout} title="Cerrar Sesión">
+          <button className="btn-logout" onClick={handleLogout} title="Cerrar sesión" aria-label="Cerrar sesión">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <polyline points="16 17 21 12 16 7" />

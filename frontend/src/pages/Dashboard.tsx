@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { StatusBadge } from '../components/StatusBadge'
-import { SeverityBadge } from '../components/SeverityBadge'
 import { engagementsApi, type Engagement } from '../api/engagements'
 import { findingsApi, type FindingSummary } from '../api/findings'
 import { crackingApi, type CrackingJob } from '../api/cracking'
@@ -14,6 +13,7 @@ interface DashboardData {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -21,9 +21,8 @@ export function Dashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const [engagements, recentFindings, crackingJobs] = await Promise.all([
+        const [engagements, crackingJobs] = await Promise.all([
           engagementsApi.list(),
-          findingsApi.list({ limit: '5' } as any).catch(() => []),
           crackingApi.jobs().catch(() => []),
         ])
         const activeEng = engagements.find((e) => e.status === 'ACTIVE')
@@ -50,7 +49,14 @@ export function Dashboard() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Dashboard</h1>
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Resumen operacional</span>
+          <h1>Estado de la auditoría</h1>
+          <p>Prioridades, trabajos y engagements en una sola vista.</p>
+        </div>
+        <Link to="/engagements/new" className="btn btn-primary">Nuevo engagement</Link>
+      </div>
 
       {/* Stats */}
       <div className="grid grid-4" style={{ marginBottom: 32 }}>
@@ -151,9 +157,9 @@ export function Dashboard() {
               </div>
             </div>
             <div style={{ marginTop: 20 }}>
-              <a href="/engagements/new" className="btn btn-primary">Crear mi primer engagement</a>
+              <Link to="/engagements/new" className="btn btn-primary">Crear mi primer engagement</Link>
               <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>o</span>
-              <a href="/tools" className="btn btn-secondary">Verificar herramientas</a>
+              <Link to="/tools" className="btn btn-secondary">Verificar herramientas</Link>
             </div>
           </div>
         </div>
@@ -184,7 +190,7 @@ export function Dashboard() {
                 </thead>
                 <tbody>
                   {activeEngagements.map((e) => (
-                    <tr key={e.id} className="clickable" onClick={() => window.location.href = `/engagements/${e.id}`}>
+                    <tr key={e.id} className="clickable" onClick={() => navigate(`/engagements/${e.id}`)}>
                       <td><Link to={`/engagements/${e.id}`} style={{ fontWeight: 600 }}>{e.code}</Link></td>
                       <td>{e.client}</td>
                       <td><StatusBadge status={e.status} /></td>
@@ -217,7 +223,7 @@ export function Dashboard() {
                 </thead>
                 <tbody>
                   {data.crackingJobs.slice(0, 5).map((j) => (
-                    <tr key={j.id} className="clickable" onClick={() => window.location.href = `/cracking/${j.id}`}>
+                    <tr key={j.id} className="clickable" onClick={() => navigate(`/cracking/${j.id}`)}>
                       <td><Link to={`/cracking/${j.id}`}>#{j.id}</Link></td>
                       <td>{j.strategy}</td>
                       <td><StatusBadge status={j.status} /></td>

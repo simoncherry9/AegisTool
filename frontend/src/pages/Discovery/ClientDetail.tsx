@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { discoveryApi, type ClientSummary } from '../../api/discovery'
 import { deauthApi } from '../../api/deauth'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
+import { interfacesApi } from '../../api/interfaces'
 
 export function ClientDetail() {
   const { mac } = useParams<{ mac: string }>()
@@ -30,9 +31,8 @@ export function ClientDetail() {
         if (status?.interface) {
           setCurrentInterface(status.interface)
         } else {
-          const { api } = await import('../../api/client')
-          const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
-          const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
+          const ifcs = await interfacesApi.list().catch(() => [])
+          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
           if (mon) setCurrentInterface(mon.name)
         }
       } catch (err: any) {

@@ -16,7 +16,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('aegis_token'))
   const [user, setUser] = useState<User | null>(() => {
     const cached = localStorage.getItem('aegis_user')
-    return cached ? JSON.parse(cached) : null
+    if (!cached) return null
+    try {
+      return JSON.parse(cached) as User
+    } catch {
+      localStorage.removeItem('aegis_user')
+      return null
+    }
   })
 
   useEffect(() => {

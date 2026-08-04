@@ -9,7 +9,7 @@ Toda la lógica es pura — sin IO, sin estado.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, TypedDict
 
 from aegiswifi.discovery.schemas import (
     PnfMode,
@@ -80,6 +80,17 @@ _WPA3_TRANSITION_KEYWORDS: Final[list[str]] = [
 _DEGRADED_PROTOCOLS: Final[set[str]] = {"WPA", "WEP", "OPEN"}
 
 
+class SecurityClassification(TypedDict):
+    protocol: SecurityProtocol
+    akm: list[str]
+    cipher: str
+    pmf: PnfMode
+    wps: bool
+    wpa3_supported: bool
+    transition_mode: TransitionMode
+    degraded: bool
+
+
 # ── Clasificación principal ─────────────────────────────────────────
 
 
@@ -90,7 +101,7 @@ def classify_security(
     wps_col: str = "",
     flags: str = "",
     essid: str = "",
-) -> dict:
+) -> SecurityClassification:
     """Clasifica la seguridad de un AP desde columnas del CSV de airodump.
 
     Args:
@@ -104,7 +115,7 @@ def classify_security(
     Returns:
         Diccionario con claves:
         - ``protocol`` (:class:`SecurityProtocol`)
-        - ``akm`` (:class:`list`\[:class:`str`\])
+        - ``akm`` (lista de cadenas)
         - ``cipher`` (:class:`str`)
         - ``pmf`` (:class:`PnfMode`)
         - ``wps`` (:class:`bool`)

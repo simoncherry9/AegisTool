@@ -5,11 +5,20 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
+from typing import TypedDict
 
 from aegiswifi.tools.schemas import ToolInfo, ToolsCheckResult
 
+
 # Herramientas requeridas para auditoría Wi-Fi
-TOOLS_DEFINITIONS: list[dict] = [
+class ToolDefinition(TypedDict):
+    name: str
+    binary: str
+    description: str
+    category: str
+
+
+TOOLS_DEFINITIONS: list[ToolDefinition] = [
     # === Captura e inyección ===
     {
         "name": "airodump-ng",

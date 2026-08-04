@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from aegiswifi.database.engine import get_db
-from aegiswifi.database.models import Engagement, Finding as FindingModel
-from aegiswifi.findings.engine import FindingsEngine, get_findings_engine
+from aegiswifi.database.models import Engagement
+from aegiswifi.findings.engine import get_findings_engine
 from aegiswifi.findings.schemas import (
     EngineResult,
     FindingCreate,
@@ -182,7 +182,7 @@ def run_findings_engine(
     import json
 
     engine = get_findings_engine()
-    context: dict = {}
+    context: dict[str, object] = {}
     if context_json:
         try:
             context = json.loads(context_json)

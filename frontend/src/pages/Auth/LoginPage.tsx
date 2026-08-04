@@ -114,9 +114,7 @@ export const LoginPage: React.FC = () => {
         </form>
 
         <div className="login-footer">
-          <p className="login-hint">
-            Credenciales iniciales: <code>admin</code> / <code>admin123</code>
-          </p>
+          <span className="login-security-dot" /> Acceso local protegido · Solo uso autorizado
         </div>
       </div>
     </div>

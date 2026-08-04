@@ -47,6 +47,7 @@ class ToolAdapter(ABC):
         self._supervisor: ProcessSupervisor | None = None
         self._results: dict[str, Any] = {}
         self._raw_result: dict[str, Any] = {}
+        self._job_parameters: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Instalación y versión
@@ -112,6 +113,7 @@ class ToolAdapter(ABC):
           - ``cwd`` (Path, opcional): directorio de trabajo.
           - ``env`` (dict, opcional): variables de entorno adicionales.
         """
+        self._job_parameters = context
         cmd = await self.build_command(context.get("options", {}))
         self._supervisor = ProcessSupervisor(
             job_id=self._job_id,

@@ -6,6 +6,8 @@ import { pmkidApi } from '../../api/pmkid'
 import { deauthApi } from '../../api/deauth'
 import { wpsApi } from '../../api/wps'
 import { api } from '../../api/client'
+import { interfacesApi } from '../../api/interfaces'
+import { engagementsApi } from '../../api/engagements'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
 
 export function APDetail() {
@@ -46,18 +48,14 @@ export function APDetail() {
         if (status?.interface) {
           setCurrentInterface(status.interface)
         } else {
-          const { api } = await import('../../api/client')
-          const ifcs = await api.get<any[]>('/interfaces').catch(() => [])
-          const mon = ifcs.find((i: any) => i.monitor_mode) || ifcs[0]
+          const ifcs = await interfacesApi.list().catch(() => [])
+          const mon = ifcs.find(i => i.monitor_mode) || ifcs[0]
           if (mon) setCurrentInterface(mon.name)
         }
 
-        const { api } = await import('../../api/client')
-        const engagements = (await api.get<any[]>('/engagements').catch(() => []))
-        const activeEngagement = engagements.find((e: any) => e.status === 'active')
-        if (activeEngagement && activeEngagement.scope) {
-          setInScope(apData.in_scope)
-        }
+        const engagements = await engagementsApi.list().catch(() => [])
+        const activeEngagement = engagements.find(e => e.status === 'ACTIVE')
+        setInScope(Boolean(activeEngagement) && apData.in_scope)
       } catch (err: any) {
         setError(err.message || 'Error loading AP')
       } finally {

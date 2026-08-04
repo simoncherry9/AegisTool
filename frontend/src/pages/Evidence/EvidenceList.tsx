@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { LoadingSpinner } from '../../components/LoadingSpinner'
 import { EmptyState } from '../../components/EmptyState'
 import { evidenceApi, type CaptureListItem } from '../../api/evidence'
@@ -17,14 +17,18 @@ export function EvidenceList() {
       .finally(() => setLoading(false))
   }, [])
 
-  async function handleDelete(id: number, e: React.MouseEvent) {
+  async function handleDownload(id: number, e: React.MouseEvent) {
     e.stopPropagation()
-    if (!confirm('Eliminar esta evidencia?')) return
     try {
-      await evidenceApi.delete(id)
-      setItems(items.filter(i => i.id !== id))
-    } catch (e: any) {
-      setError(e.message)
+      const blob = await evidenceApi.download(id)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = items.find(item => item.id === id)?.original_filename || `evidencia-${id}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo descargar la evidencia')
     }
   }
 
@@ -84,17 +88,14 @@ export function EvidenceList() {
                     <td style={{ fontSize: 10, fontFamily: 'monospace', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {ev.sha256 ? ev.sha256.substring(0, 12) + '…' : '—'}
                     </td>
-                    <td><a href={'/engagements/' + ev.engagement_id} style={{ fontSize: 12 }}>#{ev.engagement_id}</a></td>
+                    <td><Link to={'/engagements/' + ev.engagement_id} style={{ fontSize: 12 }}>#{ev.engagement_id}</Link></td>
                     <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                       {ev.created_at ? new Date(ev.created_at).toLocaleDateString() : '—'}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <a className="btn btn-sm btn-secondary" href={'/api/v1/evidence/' + ev.id + '/download'}
-                          style={{ fontSize: 10, padding: '2px 8px' }}>📥</a>
-                        <button className="btn btn-sm btn-danger"
-                          style={{ fontSize: 10, padding: '2px 8px' }}
-                          onClick={(e) => handleDelete(ev.id, e)}>🗑</button>
+                        <button className="btn btn-sm btn-secondary" onClick={(e) => handleDownload(ev.id, e)}
+                          style={{ fontSize: 10, padding: '2px 8px' }} aria-label="Descargar evidencia">Descargar</button>
                       </div>
                     </td>
                   </tr>

@@ -8,7 +8,6 @@ monitorea progreso, y persiste resultados.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
@@ -17,7 +16,7 @@ from sqlalchemy.orm import Session
 from aegiswifi.adapters.registry import get_adapter
 from aegiswifi.core.config import get_settings
 from aegiswifi.cracking.schemas import (
-    AttackMode,
+    AttackStage,
     CrackingPlan,
     CrackingProgress,
     CrackingResult,
@@ -25,8 +24,8 @@ from aegiswifi.cracking.schemas import (
 )
 from aegiswifi.database.engine import get_sessionmaker
 from aegiswifi.database.models import (
-    CrackJobStatus,
     CrackingJob,
+    CrackJobStatus,
     HandshakeArtifact,
     HandshakeQuality,
 )
@@ -61,18 +60,14 @@ class CrackingService:
                 insuficiente.
         """
         if not artifact.validated:
-            raise ValueError(
-                f"HandshakeArtifact #{artifact.id} no está validado"
-            )
+            raise ValueError(f"HandshakeArtifact #{artifact.id} no está validado")
         if artifact.quality in (HandshakeQuality.INVALID, HandshakeQuality.POOR):
             raise ValueError(
                 f"HandshakeArtifact #{artifact.id} tiene calidad "
                 f"{artifact.quality}, se requiere ≥ ACCEPTABLE"
             )
         if not artifact.hash22000_path:
-            raise ValueError(
-                f"HandshakeArtifact #{artifact.id} no tiene archivo .22000"
-            )
+            raise ValueError(f"HandshakeArtifact #{artifact.id} no tiene archivo .22000")
 
     # ------------------------------------------------------------------
     # Ejecución de plan
@@ -101,6 +96,8 @@ class CrackingService:
         if own_session:
             SessionLocal = get_sessionmaker()
             session = SessionLocal()
+
+        assert session is not None
 
         try:
             return await self._execute_with_session(plan, engagement_id, session)
@@ -147,7 +144,7 @@ class CrackingService:
             try:
                 adapter_result = await adapter.start({"options": options})
                 collected = await adapter.collect_results()
-            except Exception as exc:
+            except Exception:
                 self._transition_job(session, job.id, CrackJobStatus.FAILED)
                 result.exit_code = -1
                 return result
@@ -240,7 +237,11 @@ class CrackingService:
         """Lista CrackingJobs, opcionalmente filtrados."""
         stmt = select(CrackingJob)
         if engagement_id is not None:
-            stmt = stmt.where(CrackingJob.id == engagement_id)  # job_id ≈ artifact → engagement
+            stmt = (
+                stmt.join(HandshakeArtifact, CrackingJob.artifact_id == HandshakeArtifact.id)
+                .join(HandshakeArtifact.capture)
+                .where(HandshakeArtifact.capture.has(engagement_id=engagement_id))
+            )
         if status:
             stmt = stmt.where(CrackingJob.status == status)
         return list(session.scalars(stmt.order_by(CrackingJob.id)).all())
@@ -270,7 +271,7 @@ class CrackingService:
 
         path = artifact.hash22000_path
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 first_line = f.readline().strip()
         except (OSError, FileNotFoundError):
             return None
@@ -383,7 +384,7 @@ class CrackingService:
             event_type=event_type,
             job_id=job_id,
             engagement_id=engagement_id,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(UTC).isoformat(),
             data=data,
         )
         self._bus.publish(envelope)

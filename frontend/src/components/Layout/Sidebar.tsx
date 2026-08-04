@@ -45,15 +45,20 @@ const NAV_ITEMS = [
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  open: boolean
+  onNavigate: () => void
+}
+
+export function Sidebar({ open, onNavigate }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${open ? ' open' : ''}`}>
       <div className="sidebar-logo">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2l9 7-3 11H6L3 9l9-7zm0 2.18L5 10l2.5 8.5h9L19 10l-7-5.82z" />
           <circle cx="12" cy="13" r="2" />
         </svg>
-        AegisWiFi
+        <span><strong>Aegis</strong>WiFi<small>Audit workspace</small></span>
       </div>
       <nav className="sidebar-nav">
         {NAV_ITEMS.map((section) => (
@@ -65,6 +70,7 @@ export function Sidebar() {
                 to={item.to}
                 end={item.to === '/' || item.to === '/discovery'}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+                onClick={onNavigate}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d={item.icon} />
@@ -75,8 +81,8 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
-        v0.1.0
+      <div className="sidebar-footer">
+        <span className="system-dot" /> API local · v0.1.0
       </div>
     </aside>
   )

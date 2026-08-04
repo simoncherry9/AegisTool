@@ -19,7 +19,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from aegiswifi.core.exceptions import NotFound, ScopeViolation
 from aegiswifi.cracking.dictionary import DictionaryManager
 from aegiswifi.cracking.planner import CrackingPlanner
 from aegiswifi.cracking.rules import RulesManager
@@ -27,13 +26,12 @@ from aegiswifi.cracking.schemas import (
     AttackMode,
     CrackingJobRead,
     CrackingPlan,
-    CrackingProgress,
     CrackingResult,
     DictionaryInfo,
     HashInfo,
     RuleInfo,
 )
-from aegiswifi.cracking.service import CrackingService, get_cracking_service
+from aegiswifi.cracking.service import get_cracking_service
 from aegiswifi.database.engine import get_db
 from aegiswifi.database.models import CrackingJob, HandshakeArtifact
 
@@ -83,12 +81,20 @@ def list_dictionaries(
     return _dict_manager.scan_all(force=force_rescan)
 
 
-@router.post("/dictionaries/custom", response_model=DictionaryInfo, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/dictionaries/custom", response_model=DictionaryInfo, status_code=status.HTTP_201_CREATED
+)
 def create_custom_dictionary(body: CustomWordlistCreate) -> DictionaryInfo:
     """Crea un diccionario de palabras personalizado."""
     if not body.words:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La lista de palabras no puede estar vacía")
-    return _dict_manager.create_custom_wordlist(body.name, body.words)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La lista de palabras no puede estar vacía",
+        )
+    try:
+        return _dict_manager.create_custom_wordlist(body.name, body.words)
+    except (ValueError, FileExistsError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.delete("/dictionaries/custom/{name}", status_code=status.HTTP_204_NO_CONTENT)
@@ -96,7 +102,9 @@ def delete_custom_dictionary(name: str) -> None:
     """Elimina un diccionario personalizado."""
     deleted = _dict_manager.delete_custom_wordlist(name)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Diccionario '{name}' no encontrado")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Diccionario '{name}' no encontrado"
+        )
 
 
 @router.get("/rules", response_model=list[RuleInfo])
@@ -105,8 +113,6 @@ def list_rules(
 ) -> list[RuleInfo]:
     """Lista los archivos de reglas disponibles en el sistema."""
     return _rules_manager.scan_all(force=force_rescan)
-
-
 
 
 # ===================================================================
@@ -240,7 +246,13 @@ async def start_cracking_job(
             detail=f"CrackingJob #{job_id} no encontrado",
         )
 
-    artifact = db.get(HandshakeArtifact, job.artifact_id)
+    artifact_id = job.artifact_id
+    if artifact_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"CrackingJob #{job_id} no tiene un handshake asociado",
+        )
+    artifact = db.get(HandshakeArtifact, artifact_id)
     if artifact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -257,7 +269,7 @@ async def start_cracking_job(
 
     plan = _planner.build_plan(
         job_id=job_id,
-        artifact_id=job.artifact_id,
+        artifact_id=artifact_id,
         hash_file_path=artifact.hash22000_path or "",
         max_total_time=max_total_time,
         preferred_dicts=preferred_dicts,
