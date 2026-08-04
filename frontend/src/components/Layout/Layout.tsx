@@ -8,15 +8,16 @@ export function Layout() {
 
   return (
     <div className="layout">
+      <a className="skip-link" href="#main-content">Saltar al contenido</a>
       <Sidebar open={menuOpen} onNavigate={() => setMenuOpen(false)} />
       {menuOpen && <button className="sidebar-scrim" aria-label="Cerrar navegación" onClick={() => setMenuOpen(false)} />}
       <div className="main-area">
         <Header onMenu={() => setMenuOpen(true)} />
-        <div className="content">
+        <main className="content" id="main-content">
           <div className="content-wide">
             <Outlet />
           </div>
-        </div>
+        </main>
       </div>
     </div>
   )

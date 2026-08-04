@@ -12,6 +12,17 @@ interface DashboardData {
   crackingJobs: CrackingJob[]
 }
 
+const ICONS = {
+  engagement: 'M7 3h7l5 5v13H7V3zm7 0v6h5M10 14h6m-6 3h4',
+  risk: 'M12 3l9 16H3L12 3zm0 6v4m0 3h.01',
+  finding: 'M5 12l4 4L19 6',
+  jobs: 'M13 2L4 14h7l-1 8 9-13h-7l1-7z',
+}
+
+function MetricIcon({ path }: { path: string }) {
+  return <div className="metric-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d={path} /></svg></div>
+}
+
 export function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -25,13 +36,13 @@ export function Dashboard() {
           engagementsApi.list(),
           crackingApi.jobs().catch(() => []),
         ])
-        const activeEng = engagements.find((e) => e.status === 'ACTIVE')
-        const summary = activeEng
-          ? await findingsApi.summary(activeEng.id).catch(() => null)
+        const activeEngagement = engagements.find((engagement) => engagement.status === 'ACTIVE')
+        const summary = activeEngagement
+          ? await findingsApi.summary(activeEngagement.id).catch(() => null)
           : null
-        setData({ engagements, summary, crackingJobs } as DashboardData)
-      } catch (e: any) {
-        setError(e.message)
+        setData({ engagements, summary, crackingJobs })
+      } catch (requestError: any) {
+        setError(requestError.message)
       } finally {
         setLoading(false)
       }
@@ -39,202 +50,105 @@ export function Dashboard() {
     load()
   }, [])
 
-  if (loading) return <LoadingSpinner text="Cargando dashboard..." />
-  if (error) return <div className="callout callout-error">Error: {error}</div>
+  if (loading) return <LoadingSpinner text="Preparando el centro de operaciones..." />
+  if (error) return <div className="callout callout-error">No pudimos cargar el workspace: {error}</div>
 
-  const activeEngagements = data?.engagements?.filter((e) => e.status === 'ACTIVE') ?? []
+  const activeEngagements = data?.engagements.filter((engagement) => engagement.status === 'ACTIVE') ?? []
   const criticalOpen = data?.summary?.open_critical ?? 0
   const highOpen = data?.summary?.open_high ?? 0
-  const openJobs = data?.crackingJobs?.filter((j) => j.status === 'RUNNING' || j.status === 'QUEUED') ?? []
+  const activeJobs = data?.crackingJobs.filter((job) => job.status === 'RUNNING' || job.status === 'QUEUED') ?? []
 
   return (
-    <div>
-      <div className="page-heading">
+    <div className="page-container dashboard-page">
+      <div className="page-heading dashboard-heading">
         <div>
-          <span className="eyebrow">Resumen operacional</span>
-          <h1>Estado de la auditoría</h1>
-          <p>Prioridades, trabajos y engagements en una sola vista.</p>
+          <span className="eyebrow">Centro de operaciones</span>
+          <h1>Panorama de seguridad</h1>
+          <p>Prioridades y actividad de todos tus engagements en una única vista.</p>
         </div>
-        <Link to="/engagements/new" className="btn btn-primary">Nuevo engagement</Link>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-4" style={{ marginBottom: 32 }}>
-        <div className="card stat-card" style={{ borderTop: '3px solid var(--accent)' }}>
-          <div className="flex-between">
-            <div>
-              <div className="stat-value" style={{ color: 'var(--accent)' }}>{data?.engagements?.length ?? 0}</div>
-              <div className="stat-label">Engagements</div>
-            </div>
-            <div style={{ background: 'var(--accent-bg)', padding: 10, borderRadius: 12, color: 'var(--accent)' }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-trend up">{activeEngagements.length} activos en ejecución</div>
-        </div>
-
-        <div className="card stat-card" style={{ borderTop: '3px solid var(--red)' }}>
-          <div className="flex-between">
-            <div>
-              <div className="stat-value" style={{ color: criticalOpen > 0 ? 'var(--red)' : 'var(--green)' }}>{criticalOpen}</div>
-              <div className="stat-label">Críticos abiertos</div>
-            </div>
-            <div style={{ background: 'var(--red-bg)', padding: 10, borderRadius: 12, color: 'var(--red)' }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-trend" style={{ color: highOpen > 0 ? 'var(--orange)' : 'var(--text-muted)' }}>
-            {highOpen} vulnerabilidades de severidad alta
-          </div>
-        </div>
-
-        <div className="card stat-card" style={{ borderTop: '3px solid var(--yellow)' }}>
-          <div className="flex-between">
-            <div>
-              <div className="stat-value" style={{ color: 'var(--yellow)' }}>{data?.summary?.total ?? 0}</div>
-              <div className="stat-label">Hallazgos totales</div>
-            </div>
-            <div style={{ background: 'var(--yellow-bg)', padding: 10, borderRadius: 12, color: 'var(--yellow)' }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-trend" style={{ color: 'var(--text-muted)' }}>Registrados en auditoría activa</div>
-        </div>
-
-        <div className="card stat-card" style={{ borderTop: '3px solid var(--purple)' }}>
-          <div className="flex-between">
-            <div>
-              <div className="stat-value" style={{ color: openJobs.length > 0 ? 'var(--accent)' : 'var(--text-muted)' }}>{openJobs.length}</div>
-              <div className="stat-label">Trabajos activos</div>
-            </div>
-            <div style={{ background: 'var(--purple-bg)', padding: 10, borderRadius: 12, color: 'var(--purple)' }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-trend up">{data?.crackingJobs?.length ?? 0} ejecutados en total</div>
+        <div className="page-actions">
+          <Link to="/discovery" className="btn btn-secondary">Iniciar discovery</Link>
+          <Link to="/engagements/new" className="btn btn-primary">
+            <span aria-hidden="true">＋</span> Nuevo engagement
+          </Link>
         </div>
       </div>
 
-      {/* Getting started — solos cuando no hay actividad */}
-      {data?.engagements?.length === 0 && (
-        <div className="card" style={{ marginBottom: 24, background: 'linear-gradient(135deg, var(--bg-card), var(--bg-secondary))' }}>
-          <div style={{ textAlign: 'center', padding: '32px 16px' }}>
-            <h2 style={{ marginBottom: 8 }}>Bienvenido a AegisWiFi</h2>
-            <p style={{ color: 'var(--text-muted)', maxWidth: 480, margin: '0 auto 24px' }}>
-              Plataforma profesional de auditoria de redes inalambricas.
-              Sigue estos pasos para comenzar:
-            </p>
-            <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <div className="card" style={{ padding: 16, minWidth: 160, textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 4 }}>1</div>
-                <strong>Crear engagement</strong>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Define el alcance de la auditoria</div>
-              </div>
-              <div className="card" style={{ padding: 16, minWidth: 160, textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 4 }}>2</div>
-                <strong>Descubrir redes</strong>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Escanea puntos de acceso y clientes</div>
-              </div>
-              <div className="card" style={{ padding: 16, minWidth: 160, textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 4 }}>3</div>
-                <strong>Validar handshakes</strong>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Captura y valida credenciales</div>
-              </div>
-              <div className="card" style={{ padding: 16, minWidth: 160, textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 4 }}>4</div>
-                <strong>Auditar hallazgos</strong>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Revisa resultados y genera informes</div>
-              </div>
-            </div>
-            <div style={{ marginTop: 20 }}>
-              <Link to="/engagements/new" className="btn btn-primary">Crear mi primer engagement</Link>
-              <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>o</span>
-              <Link to="/tools" className="btn btn-secondary">Verificar herramientas</Link>
-            </div>
+      <section className="metrics-grid" aria-label="Indicadores principales">
+        <article className="metric-card metric-accent">
+          <div className="metric-top"><span className="metric-label">Engagements</span><MetricIcon path={ICONS.engagement} /></div>
+          <div className="metric-value">{data?.engagements.length ?? 0}</div>
+          <div className="metric-foot"><span className="metric-indicator" />{activeEngagements.length} activos ahora</div>
+        </article>
+        <article className="metric-card metric-danger">
+          <div className="metric-top"><span className="metric-label">Riesgo crítico</span><MetricIcon path={ICONS.risk} /></div>
+          <div className="metric-value">{criticalOpen}</div>
+          <div className="metric-foot">{highOpen} hallazgos de severidad alta</div>
+        </article>
+        <article className="metric-card metric-warning">
+          <div className="metric-top"><span className="metric-label">Hallazgos</span><MetricIcon path={ICONS.finding} /></div>
+          <div className="metric-value">{data?.summary?.total ?? 0}</div>
+          <div className="metric-foot">Registrados en la auditoría activa</div>
+        </article>
+        <article className="metric-card metric-purple">
+          <div className="metric-top"><span className="metric-label">Trabajos activos</span><MetricIcon path={ICONS.jobs} /></div>
+          <div className="metric-value">{activeJobs.length}</div>
+          <div className="metric-foot">{data?.crackingJobs.length ?? 0} ejecutados en total</div>
+        </article>
+      </section>
+
+      {data?.engagements.length === 0 && (
+        <section className="onboarding-panel">
+          <div className="onboarding-copy">
+            <span className="eyebrow">Primeros pasos</span>
+            <h2>Configura tu primer workspace de auditoría</h2>
+            <p>Crea el engagement, define el alcance autorizado y valida el entorno antes de iniciar actividad inalámbrica.</p>
+            <div className="page-actions"><Link to="/engagements/new" className="btn btn-primary">Crear engagement</Link><Link to="/tools" className="btn btn-secondary">Verificar entorno</Link></div>
           </div>
-        </div>
+          <ol className="onboarding-steps">
+            <li><span>01</span><div><strong>Alcance</strong><small>Objetivos y activos autorizados</small></div></li>
+            <li><span>02</span><div><strong>Reconocimiento</strong><small>APs, clientes y superficie</small></div></li>
+            <li><span>03</span><div><strong>Validación</strong><small>Evidencia y resultados</small></div></li>
+          </ol>
+        </section>
       )}
 
-      <div className="grid grid-2">
-        {/* Active engagements */}
-        <div className="card">
+      <div className="dashboard-grid">
+        <section className="card dashboard-table-card">
           <div className="card-header">
-            <div>
-              <div className="card-title">Engagements activos</div>
-              <div className="card-subtitle">Auditorías en curso</div>
-            </div>
-            <Link to="/engagements" className="btn btn-sm btn-secondary">Ver todos</Link>
+            <div><div className="card-kicker">Workspace</div><h2 className="card-title">Engagements activos</h2><div className="card-subtitle">Auditorías actualmente en ejecución</div></div>
+            <Link to="/engagements" className="text-link">Ver todos <span>→</span></Link>
           </div>
           {activeEngagements.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)' }}>
-              <p>No hay engagements activos</p>
-              <Link to="/engagements/new" className="btn btn-primary" style={{ marginTop: 12 }}>
-                Crear engagement
-              </Link>
-            </div>
+            <div className="compact-empty"><div className="empty-orbit" /><strong>Sin engagements activos</strong><span>Inicia uno para ver aquí su estado.</span><Link to="/engagements/new">Crear engagement</Link></div>
           ) : (
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr><th>Código</th><th>Cliente</th><th>Estado</th></tr>
-                </thead>
-                <tbody>
-                  {activeEngagements.map((e) => (
-                    <tr key={e.id} className="clickable" onClick={() => navigate(`/engagements/${e.id}`)}>
-                      <td><Link to={`/engagements/${e.id}`} style={{ fontWeight: 600 }}>{e.code}</Link></td>
-                      <td>{e.client}</td>
-                      <td><StatusBadge status={e.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <div className="table-container"><table><thead><tr><th>Código</th><th>Cliente</th><th>Estado</th></tr></thead><tbody>
+              {activeEngagements.map((engagement) => (
+                <tr key={engagement.id} className="clickable" onClick={() => navigate(`/engagements/${engagement.id}`)}>
+                  <td><Link to={`/engagements/${engagement.id}`} className="primary-cell">{engagement.code}</Link></td><td>{engagement.client}</td><td><StatusBadge status={engagement.status} /></td>
+                </tr>
+              ))}
+            </tbody></table></div>
           )}
-        </div>
+        </section>
 
-        {/* Active jobs */}
-        <div className="card">
+        <section className="card dashboard-table-card">
           <div className="card-header">
-            <div>
-              <div className="card-title">Cracking jobs</div>
-              <div className="card-subtitle">Últimos trabajos</div>
-            </div>
-            <Link to="/cracking" className="btn btn-sm btn-secondary">Ver todos</Link>
+            <div><div className="card-kicker">Procesamiento</div><h2 className="card-title">Últimos trabajos</h2><div className="card-subtitle">Actividad de análisis de credenciales</div></div>
+            <Link to="/cracking" className="text-link">Ver todos <span>→</span></Link>
           </div>
-          {!data?.crackingJobs?.length ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)' }}>
-              <p>No hay trabajos de cracking</p>
-            </div>
+          {!data?.crackingJobs.length ? (
+            <div className="compact-empty"><div className="empty-orbit" /><strong>Sin trabajos recientes</strong><span>La actividad aparecerá aquí.</span></div>
           ) : (
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr><th>#</th><th>Estrategia</th><th>Estado</th><th>Progreso</th></tr>
-                </thead>
-                <tbody>
-                  {data.crackingJobs.slice(0, 5).map((j) => (
-                    <tr key={j.id} className="clickable" onClick={() => navigate(`/cracking/${j.id}`)}>
-                      <td><Link to={`/cracking/${j.id}`}>#{j.id}</Link></td>
-                      <td>{j.strategy}</td>
-                      <td><StatusBadge status={j.status} /></td>
-                      <td>{j.progress != null ? `${(j.progress * 100).toFixed(0)}%` : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <div className="table-container"><table><thead><tr><th>Trabajo</th><th>Estrategia</th><th>Estado</th><th>Progreso</th></tr></thead><tbody>
+              {data.crackingJobs.slice(0, 5).map((job) => (
+                <tr key={job.id} className="clickable" onClick={() => navigate(`/cracking/${job.id}`)}>
+                  <td><Link to={`/cracking/${job.id}`} className="primary-cell">#{job.id}</Link></td><td>{job.strategy}</td><td><StatusBadge status={job.status} /></td><td><div className="progress-cell"><div className="progress-track"><span style={{ width: `${Math.min(100, (job.progress ?? 0) * 100)}%` }} /></div><small>{job.progress != null ? `${(job.progress * 100).toFixed(0)}%` : '—'}</small></div></td>
+                </tr>
+              ))}
+            </tbody></table></div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   )

@@ -88,14 +88,14 @@ def test_policy_allows_in_scope():
 
 
 def test_policy_blocks_out_of_scope_ssid():
-    engine = PolicyEngine(_ctx())
+    engine = PolicyEngine(_ctx(), enforcement_enabled=True)
     with pytest.raises(ScopeViolation):
         engine.assert_allowed("handshake_capture", ssid="OTHER", bssid="AA:BB:CC:DD:EE:FF")
 
 
 def test_policy_blocks_unpermitted_action():
     perm = Permissions(handshake_capture=False)
-    engine = PolicyEngine(_ctx(perm=perm))
+    engine = PolicyEngine(_ctx(perm=perm), enforcement_enabled=True)
     with pytest.raises(ScopeViolation):
         engine.assert_allowed("handshake_capture", ssid="LAB", bssid="AA:BB:CC:DD:EE:FF")
 
@@ -116,21 +116,23 @@ def test_policy_blocks_expired_window():
         operator="Op",
     )
     with pytest.raises(ScopeViolation):
-        PolicyEngine(ctx).assert_allowed("handshake_capture", ssid="LAB", bssid="AA:BB:CC:DD:EE:FF")
+        PolicyEngine(ctx, enforcement_enabled=True).assert_allowed(
+            "handshake_capture", ssid="LAB", bssid="AA:BB:CC:DD:EE:FF"
+        )
 
 
 def test_policy_frame_budget():
     ctx = _ctx()
     ctx.usage = Usage(active_frames_sent=4)
     with pytest.raises(ScopeViolation):
-        PolicyEngine(ctx).assert_within_frame_budget()
+        PolicyEngine(ctx, enforcement_enabled=True).assert_within_frame_budget()
 
 
 def test_policy_gpu_temperature():
     ctx = _ctx()
     ctx.usage = Usage(current_gpu_temp=80)
     with pytest.raises(ScopeViolation):
-        PolicyEngine(ctx).assert_gpu_temperature()
+        PolicyEngine(ctx, enforcement_enabled=True).assert_gpu_temperature()
 
 
 # ===================================================================

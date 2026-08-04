@@ -3,12 +3,10 @@
 El PolicyEngine es el guardián del sistema. Antes de cualquier acción activa,
 cada módulo debe invocar PolicyEngine.assert_allowed con el contexto correspondiente.
 
-En desarrollo puede desactivarse explícitamente mediante:
+Por defecto las políticas están desactivadas (modo permisivo): ninguna acción
+pide permiso ni valida alcance. Pueden activarse explícitamente con:
 
-    AEGIS_ENV=development
-    AEGIS_POLICY_ENFORCEMENT=false
-
-Fuera del entorno development, cualquier intento de desactivarlo genera un error.
+    AEGIS_POLICY_ENFORCEMENT=true
 """
 
 from __future__ import annotations
@@ -51,27 +49,12 @@ def resolve_policy_enforcement() -> bool:
     """Determina si el PolicyEngine debe aplicar sus controles.
 
     Reglas:
-      - Por defecto, las políticas están activadas.
-      - Solo pueden desactivarse con AEGIS_ENV=development.
-      - En test también permanecen activadas salvo que se inyecte explícitamente
-        enforcement_enabled=False al construir PolicyEngine.
-      - Nunca se permite desactivarlas por variable de entorno en producción.
+      - Por defecto, las políticas están desactivadas: ninguna acción pide
+        permiso y ninguna validación de alcance bloquea.
+      - Pueden activarse explícitamente con AEGIS_POLICY_ENFORCEMENT=true.
     """
 
-    environment = os.getenv("AEGIS_ENV", "production").strip().lower()
-
-    enforcement_enabled = _read_boolean_env(
-        "AEGIS_POLICY_ENFORCEMENT",
-        default=True,
-    )
-
-    if not enforcement_enabled and environment != "development":
-        raise RuntimeError(
-            "No se puede desactivar el PolicyEngine fuera de development. "
-            "Definí AEGIS_ENV=development para usar el modo permisivo."
-        )
-
-    return enforcement_enabled
+    return _read_boolean_env("AEGIS_POLICY_ENFORCEMENT", default=False)
 
 
 @dataclass
